@@ -1,0 +1,50 @@
+# IntelliExam-Agent 依赖配置
+# Python 3.10+
+
+# 核心框架
+langchain>=0.2.0
+langchain-core>=0.2.0
+langchain-openai>=0.1.0
+langchain-community>=0.2.0
+langgraph>=0.1.0
+langchain-text-splitters>=0.2.0
+
+# 前端框架
+# chainlit>=2.0.0   # Chainlit（已替换为 FastAPI 自定义前端）
+# streamlit>=1.30.0 # Streamlit（备选）
+
+# FastAPI 自定义前端（方案 A）
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
+websockets>=13.0
+
+# 向量数据库
+chromadb>=0.4.0
+
+# 文档处理
+pypdf>=4.0.0
+docx2txt>=0.8
+
+# 嵌入模型（OpenAI 兼容）
+openai>=1.0.0
+tiktoken>=0.5.0
+
+# 可选嵌入模型依赖
+# 用于 Ollama 本地模型
+langchain-ollama>=0.1.0
+# 用于 HuggingFace 本地模型
+# sentence-transformers>=2.2.0
+# 用于阿里云灵积（通义）Embedding
+# dashscope>=1.14.0
+
+# 工具库
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+
+# 可选：Qdrant 向量数据库
+# qdrant-client>=1.7.0
+
+# MCP (Model Context Protocol)
+mcp>=1.0.0
+langchain-mcp-adapters>=0.1.0

@@ -1,0 +1,515 @@
+"""
+IntelliExam-Agent FastAPI 服务
+
+替换 Chainlit，提供：
+- 静态文件服务（frontend/ 目录）
+- WebSocket /ws/{session_id}：实时 Agent 执行状态推送
+- REST API：对话管理、文件上传、记忆库查询
+"""
+
+import asyncio
+import json
+import os
+import sys
+import uuid
+from datetime import datetime
+from typing import Dict, Any, List, Optional
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException, Query
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from graphs.state import create_initial_state
+from graphs.workflow_server import run_workflow_async_server
+from utils.conversation_manager import get_conversation_manager
+from utils.memory_manager import get_memory_manager
+from agents.executor_agent import format_questions_response
+from tools.retriever import get_retriever, VECTOR_STORE_AVAILABLE
+
+
+# ==================== 应用初始化 ====================
+
+app = FastAPI(
+    title="IntelliExam-Agent API",
+    description="AI 智能命题系统后端服务",
+    version="2.0.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 内存会话存储 {session_id -> session_data}
+sessions: Dict[str, Dict[str, Any]] = {}
+
+
+# ==================== WebSocket 端点 ====================
+
+@app.websocket("/ws/{session_id}")
+async def websocket_endpoint(websocket: WebSocket, session_id: str):
+    """
+    WebSocket 实时通信端点
+
+    消息协议：
+      客户端→服务端: {"type": "message", "content": "...", "conversation_id": "..."}
+                     {"type": "ping"}
+                     {"type": "switch_conversation", "conversation_id": "..."}
+
+      服务端→客户端: {"type": "connected", "session_id": "...", "conversation_id": "..."}
+                     {"type": "agent_step", "step": "...", "status": "running|done|error", "detail": "...", "elapsed": "1.2s"}
+                     {"type": "agent_params", "params": {...}}
+                     {"type": "response", "content": "..."}
+                     {"type": "result", "markdown": "...", "question_count": 5, "topic": "..."}
+                     {"type": "error", "message": "..."}
+                     {"type": "pong"}
+    """
+    await websocket.accept()
+
+    conv_manager = get_conversation_manager()
+
+    # 新建初始对话
+    conversation = conv_manager.create_conversation()
+    conv_id = conversation["id"]
+    sess_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    state = create_initial_state("", sess_time)
+
+    sessions[session_id] = {
+        "state": state,
+        "chat_history": [],
+        "conversation_id": conv_id,
+    }
+
+    # 通知连接成功
+    await websocket.send_json({
+        "type": "connected",
+        "session_id": session_id,
+        "conversation_id": conv_id
+    })
+
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+
+            msg_type = data.get("type", "")
+
+            # ---- 心跳 ----
+            if msg_type == "ping":
+                await websocket.send_json({"type": "pong"})
+                continue
+
+            # ---- 切换/重置会话 ----
+            if msg_type == "switch_conversation":
+                new_conv_id = data.get("conversation_id", "")
+                if new_conv_id:
+                    # 加载历史对话
+                    conv_data = conv_manager.load_conversation(new_conv_id)
+                    if conv_data:
+                        msgs = conv_data.get("messages", [])
+                        history = [{"role": m["role"], "content": m["content"]} for m in msgs]
+                        sess_time2 = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        sessions[session_id] = {
+                            "state": create_initial_state("", sess_time2),
+                            "chat_history": history,
+                            "conversation_id": new_conv_id,
+                        }
+                        await websocket.send_json({
+                            "type": "conversation_loaded",
+                            "conversation_id": new_conv_id,
+                            "messages": [
+                                {"role": m["role"], "content": m["content"]}
+                                for m in msgs
+                            ]
+                        })
+                    continue
+                else:
+                    # 新建对话
+                    new_conv = conv_manager.create_conversation()
+                    new_conv_id = new_conv["id"]
+                    sess_time2 = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    sessions[session_id] = {
+                        "state": create_initial_state("", sess_time2),
+                        "chat_history": [],
+                        "conversation_id": new_conv_id,
+                    }
+                    await websocket.send_json({
+                        "type": "conversation_created",
+                        "conversation_id": new_conv_id,
+                    })
+                    continue
+
+            # ---- 用户发送消息 ----
+            if msg_type == "message":
+                content = data.get("content", "").strip()
+                if not content:
+                    continue
+
+                sess = sessions[session_id]
+                state = sess["state"]
+                chat_history = sess["chat_history"]
+
+                state["user_input"] = content
+                chat_history.append({
+                    "role": "user",
+                    "content": content,
+                    "timestamp": datetime.now().isoformat()
+                })
+
+                # ---- 步骤计时器 ----
+                step_timers: Dict[str, datetime] = {}
+                current_steps: List[Dict] = []
+
+                async def step_callback(step_name: str, detail: str, params: dict = None):
+                    """工作流步骤回调：推送步骤状态到客户端"""
+                    now = datetime.now()
+
+                    # 关闭上一个 running 步骤
+                    for s in current_steps:
+                        if s["status"] == "running":
+                            elapsed = (now - step_timers.get(s["step"], now)).total_seconds()
+                            s["status"] = "done"
+                            s["elapsed"] = f"{elapsed:.1f}s"
+                            await websocket.send_json({
+                                "type": "agent_step",
+                                "step": s["step"],
+                                "status": "done",
+                                "detail": s.get("detail", ""),
+                                "elapsed": s["elapsed"]
+                            })
+
+                    # 添加新步骤
+                    new_step = {
+                        "step": step_name,
+                        "status": "running",
+                        "detail": detail,
+                        "elapsed": None
+                    }
+                    current_steps.append(new_step)
+                    step_timers[step_name] = now
+
+                    await websocket.send_json({
+                        "type": "agent_step",
+                        "step": step_name,
+                        "status": "running",
+                        "detail": detail,
+                        "elapsed": None
+                    })
+
+                    if params:
+                        await websocket.send_json({
+                            "type": "agent_params",
+                            "params": params
+                        })
+
+                # ---- 运行工作流 ----
+                try:
+                    result = await run_workflow_async_server(
+                        state,
+                        chat_history,
+                        status_callback=step_callback
+                    )
+                except Exception as e:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": f"工作流执行失败: {str(e)}"
+                    })
+                    continue
+
+                # ---- 关闭最后的 running 步骤 ----
+                now = datetime.now()
+                for s in current_steps:
+                    if s["status"] == "running":
+                        elapsed = (now - step_timers.get(s["step"], now)).total_seconds()
+                        await websocket.send_json({
+                            "type": "agent_step",
+                            "step": s["step"],
+                            "status": "done",
+                            "detail": s.get("detail", ""),
+                            "elapsed": f"{elapsed:.1f}s"
+                        })
+
+                # ---- 构建最终响应 ----
+                final_response = result.get("final_response", "")
+                if not final_response:
+                    if result.get("draft_questions"):
+                        final_response = format_questions_response(result["draft_questions"])
+                    else:
+                        final_response = "任务处理完成，但未能生成有效结果，请重试。"
+
+                chart_history_updated = chat_history + [{
+                    "role": "assistant",
+                    "content": final_response,
+                    "timestamp": datetime.now().isoformat()
+                }]
+
+                # 保存到对话历史
+                current_conv_id = sess["conversation_id"]
+                try:
+                    conv_manager.add_message(current_conv_id, "user", content)
+                    conv_manager.add_message(current_conv_id, "assistant", final_response)
+                except Exception:
+                    pass
+
+                # 发送最终文本响应
+                await websocket.send_json({
+                    "type": "response",
+                    "content": final_response
+                })
+
+                # 如果有试题，额外发送结构化结果（用于右侧面板展示+下载）
+                draft_questions = result.get("draft_questions", [])
+                if draft_questions:
+                    params = result.get("extracted_params", {})
+                    await websocket.send_json({
+                        "type": "result",
+                        "markdown": final_response,
+                        "question_count": len(draft_questions),
+                        "topic": params.get("topic", "试题"),
+                        "question_type": params.get("question_type", ""),
+                        "difficulty": params.get("difficulty", ""),
+                    })
+
+                # 更新会话状态
+                sess["state"] = result
+                sess["chat_history"] = chart_history_updated
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        print(f"WebSocket 异常: {e}")
+    finally:
+        sessions.pop(session_id, None)
+
+
+# ==================== REST API ====================
+
+@app.get("/api/conversations")
+async def list_conversations(limit: int = Query(20, ge=1, le=100)):
+    """获取历史对话列表"""
+    conv_manager = get_conversation_manager()
+    conversations = conv_manager.list_conversations(limit=limit)
+    return {"conversations": conversations}
+
+
+@app.post("/api/conversations")
+async def create_conversation():
+    """新建对话"""
+    conv_manager = get_conversation_manager()
+    conv = conv_manager.create_conversation()
+    return conv
+
+
+@app.get("/api/conversations/{conversation_id}")
+async def get_conversation(conversation_id: str):
+    """加载指定对话"""
+    conv_manager = get_conversation_manager()
+    conv = conv_manager.load_conversation(conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    return conv
+
+
+@app.delete("/api/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str):
+    """删除指定对话"""
+    conv_manager = get_conversation_manager()
+    success = conv_manager.delete_conversation(conversation_id)
+    return {"success": success}
+
+
+@app.delete("/api/conversations")
+async def clear_all_conversations():
+    """清除所有对话"""
+    conv_manager = get_conversation_manager()
+    count = conv_manager.clear_all_conversations()
+    return {"deleted_count": count}
+
+
+@app.get("/api/memories")
+async def get_memories(limit: int = Query(20, ge=1, le=100)):
+    """获取记忆库内容"""
+    manager = get_memory_manager()
+    memories = manager.get_all_memories(limit=limit)
+    return {"memories": memories}
+
+
+@app.post("/api/upload")
+async def upload_file(file: UploadFile = File(...)):
+    """上传知识库文件"""
+    filename = file.filename or "uploaded_file"
+    file_path = os.path.join("data", "knowledge_base", filename)
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+    content = await file.read()
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    if VECTOR_STORE_AVAILABLE:
+        retriever = get_retriever()
+        success = retriever.add_documents(file_path)
+        return {
+            "filename": filename,
+            "success": success,
+            "message": f"文件 {filename} 已{'成功' if success else '失败'}添加到知识库"
+        }
+
+    return {"filename": filename, "success": True, "message": f"文件 {filename} 已保存"}
+
+
+@app.get("/api/health")
+async def health_check():
+    """健康检查"""
+    return {"status": "ok", "timestamp": datetime.now().isoformat()}
+
+
+# ==================== Skills & MCP API ====================
+
+@app.get("/api/skills")
+async def list_skills():
+    """获取所有已注册的技能列表"""
+    from skills.registry import get_skill_registry
+    registry = get_skill_registry()
+    return {"skills": registry.to_dict_list()}
+
+
+@app.post("/api/skills/{skill_id}/enable")
+async def enable_skill(skill_id: str):
+    """启用指定技能"""
+    from skills.registry import get_skill_registry
+    registry = get_skill_registry()
+    success = registry.enable(skill_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"技能 {skill_id} 不存在")
+    return {"success": True, "message": f"技能 {skill_id} 已启用"}
+
+
+@app.post("/api/skills/{skill_id}/disable")
+async def disable_skill(skill_id: str):
+    """禁用指定技能"""
+    from skills.registry import get_skill_registry
+    registry = get_skill_registry()
+    success = registry.disable(skill_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"技能 {skill_id} 不存在")
+    return {"success": True, "message": f"技能 {skill_id} 已禁用"}
+
+
+@app.get("/api/mcp/status")
+async def mcp_status():
+    """获取 MCP 服务状态"""
+    from utils.mcp_client import get_mcp_client
+    client = get_mcp_client()
+    return client.get_status()
+
+
+@app.post("/api/asr")
+async def transcribe_audio(file: UploadFile = File(...)):
+    """
+    语音识别接口
+
+    接收音频文件（WebM/WAV），调用 vllm Qwen ASR 服务转录为文字。
+
+    Args:
+        file: 上传的音频文件
+
+    Returns:
+        转录后的文本
+    """
+    import tempfile
+    import base64
+
+    # 保存临时文件
+    suffix = ".webm" if "webm" in (file.content_type or "") else ".wav"
+    try:
+        content = await file.read()
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        # 读取并编码为 base64
+        with open(tmp_path, "rb") as f:
+            audio_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+        # 构建 data URL
+        mime = file.content_type or "audio/webm"
+        audio_data_url = f"data:{mime};base64,{audio_b64}"
+
+        # 调用 ASR 服务
+        from utils.config import get_asr_client, settings
+        client = get_asr_client()
+
+        response = client.chat.completions.create(
+            model=settings.asr_model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_audio",
+                            "input_audio": {
+                                "data": audio_data_url,
+                                "format": suffix.lstrip(".")
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "请将这段语音转录为文字，只输出转录的文字内容，不要添加任何解释。"
+                        }
+                    ]
+                }
+            ],
+            max_tokens=500,
+            temperature=0
+        )
+
+        text = response.choices[0].message.content.strip()
+        return {"text": text, "success": True}
+
+    except Exception as e:
+        print(f"ASR 转录失败: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"text": "", "success": False, "error": str(e)}
+        )
+    finally:
+        # 清理临时文件
+        try:
+            import os as _os
+            _os.unlink(tmp_path)
+        except Exception:
+            pass
+
+
+# ==================== 静态文件服务 ====================
+
+# 先挂载 API 路由，再挂载静态文件（顺序重要）
+frontend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend")
+
+@app.get("/")
+async def serve_index():
+    return FileResponse(os.path.join(frontend_dir, "index.html"))
+
+# 挂载静态文件（CSS、JS 等）
+app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="static")
+
+
+# ==================== 启动入口 ====================
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "server:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        reload_dirs=["."]
+    )

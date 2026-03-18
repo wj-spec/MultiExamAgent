@@ -1,0 +1,80 @@
+{
+  "id": "conv_20260309_093955_8f8b1b",
+  "title": "对话 2026-03-09 09:39",
+  "created_at": "2026-03-09T09:39:55.734373",
+  "updated_at": "2026-03-09T10:01:42.505996",
+  "message_count": 10,
+  "metadata": {},
+  "messages": [
+    {
+      "id": "msg_0ae6731e",
+      "role": "user",
+      "content": "Hello",
+      "timestamp": "2026-03-09T09:41:00.947274",
+      "metadata": {}
+    },
+    {
+      "id": "msg_79012207",
+      "role": "assistant",
+      "content": "你好呀！👋 很高兴为您服务。\n\n我是智能命题助手，可以帮您生成选择题、填空题、解答题等多种题型，还能根据需求调整难度。\n\n请问您今天想为哪个学科或知识点出题呢？",
+      "timestamp": "2026-03-09T09:41:00.953258",
+      "metadata": {}
+    },
+    {
+      "id": "msg_ea242a9d",
+      "role": "user",
+      "content": "Help me create a math multiple choice question",
+      "timestamp": "2026-03-09T09:41:57.300901",
+      "metadata": {}
+    },
+    {
+      "id": "msg_d3a3daeb",
+      "role": "assistant",
+      "content": "请问您希望考查哪个具体的数学知识点（如代数、几何、函数等）？以及需要简单、中等还是困难难度的题目？",
+      "timestamp": "2026-03-09T09:41:57.307127",
+      "metadata": {}
+    },
+    {
+      "id": "msg_60fb580b",
+      "role": "user",
+      "content": "Algebra, medium difficulty",
+      "timestamp": "2026-03-09T09:42:51.371373",
+      "metadata": {}
+    },
+    {
+      "id": "msg_cb70a72a",
+      "role": "assistant",
+      "content": "请问您需要生成几道试题？",
+      "timestamp": "2026-03-09T09:42:51.378323",
+      "metadata": {}
+    },
+    {
+      "id": "msg_dda31ad0",
+      "role": "user",
+      "content": "1",
+      "timestamp": "2026-03-09T09:43:36.537326",
+      "metadata": {}
+    },
+    {
+      "id": "msg_8fe309fc",
+      "role": "assistant",
+      "content": "没问题，这就为您生成一道代数选择题（中等难度）：\n\n**题目：** 若 $3(x - 2) = 2x + 4$，则 $x$ 的值为？\nA. 6\nB. 8\nC. 10\nD. 12\n\n**参考答案：** C\n\n您觉得这道题的难度和格式合适吗？如果需要调整选项、增加解析或更换知识点，请随时告诉我！",
+      "timestamp": "2026-03-09T09:43:36.543249",
+      "metadata": {}
+    },
+    {
+      "id": "msg_f554ae7e",
+      "role": "user",
+      "content": "Help me create a math exam and save it as a file",
+      "timestamp": "2026-03-09T10:01:42.501695",
+      "metadata": {}
+    },
+    {
+      "id": "msg_a55fd849",
+      "role": "assistant",
+      "content": "请问您需要考查哪些具体的数学知识点（如代数、几何、函数等）？以及需要简单、中等还是困难难度的题目？另外，您希望生成几道试题，包含哪些题型（选择题、填空题、解答题等）？",
+      "timestamp": "2026-03-09T10:01:42.505996",
+      "metadata": {}
+    }
+  ]
+}
