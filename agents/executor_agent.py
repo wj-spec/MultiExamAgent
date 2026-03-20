@@ -16,7 +16,7 @@ from graphs.state import (
     AgentState, add_status_message, QuestionItem
 )
 from utils.prompts import CREATOR_PROMPT, AUDITOR_PROMPT
-from tools.retriever import search_knowledge
+from rag_engine.hybrid_retriever import get_hybrid_retriever
 from utils.config import get_llm
 
 
@@ -284,7 +284,8 @@ class AuditorAgent:
                 response = llm_with_tools.invoke(messages)
 
             # 提取最终文本内容
-            final_text = response.content if hasattr(response, "content") else str(response)
+            final_text = response.content if hasattr(
+                response, "content") else str(response)
             return self._parse_audit_result(final_text)
 
         except Exception as e:
@@ -304,7 +305,8 @@ def knowledge_retrieval_node(state: AgentState) -> AgentState:
     """
     知识检索节点
 
-    从业务知识库检索相关知识点内容。
+    使用多源混合检索器从多个来源检索相关知识内容。
+    支持本地知识库、网络搜索和深度网页爬取。
 
     Args:
         state: 当前状态
@@ -312,25 +314,42 @@ def knowledge_retrieval_node(state: AgentState) -> AgentState:
     Returns:
         更新后的状态
     """
-    new_state = add_status_message(state, "🔍 正在检索知识库...")
+    new_state = add_status_message(state, "正在智能检索知识...")
 
-    # 获取知识点
-    topic = state["extracted_params"].get("topic", "")
+    # 获取知识点和额外要求
+    params = state.get("extracted_params", {})
+    topic = params.get("topic", "")
+    additional_requirements = params.get("additional_requirements", "")
 
-    # 检索知识
-    knowledge = search_knowledge(topic, top_k=3)
+    # 构建检索查询
+    query = f"{topic} {additional_requirements}".strip()
+
+    # 使用多源混合检索器
+    retriever = get_hybrid_retriever()
+    result = retriever.smart_retrieve(query, top_k=4, use_rerank=True)
 
     # 更新状态
     new_state = dict(new_state)
-    new_state["retrieved_knowledge"] = knowledge
+    new_state["retrieved_knowledge"] = result["context_str"]
+    new_state["route_decision"] = result["route_decision"]
+    new_state["search_route"] = result["route"]
+    new_state["search_query"] = result["search_query"]
+    new_state["search_sources"] = result["sources_info"]
     new_state["current_step_index"] = 1
     new_state["current_step"] = "生成试题"
     new_state["next_node"] = "creator"
 
-    if knowledge:
-        new_state = add_status_message(new_state, f"📚 检索到相关知识点内容")
-    else:
-        new_state = add_status_message(new_state, "📚 未检索到知识库内容，将基于通用知识生成")
+    # 添加状态消息
+    route = result["route"]
+    doc_count = result["doc_count"]
+    route_messages = {
+        "local": f"检索本地知识库完成，找到 {doc_count} 条相关内容",
+        "api": f"网络搜索完成，找到 {doc_count} 条相关资讯",
+        "browser": f"深度网页提取完成，找到 {doc_count} 条内容",
+        "hybrid": f"多源混合检索完成，找到 {doc_count} 条相关内容"
+    }
+    new_state = add_status_message(
+        new_state, route_messages.get(route, f"检索完成，找到 {doc_count} 条内容"))
 
     return new_state
 
@@ -373,7 +392,8 @@ def creator_node(state: AgentState) -> AgentState:
     new_state["next_node"] = "auditor"
 
     if questions:
-        new_state = add_status_message(new_state, f"📝 已生成 {len(questions)} 道试题")
+        new_state = add_status_message(
+            new_state, f"📝 已生成 {len(questions)} 道试题")
     else:
         new_state = add_status_message(new_state, "⚠️ 试题生成失败")
         new_state["error_message"] = "试题生成失败"

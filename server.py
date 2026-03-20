@@ -7,6 +7,13 @@ IntelliExam-Agent FastAPI 服务
 - REST API：对话管理、文件上传、记忆库查询
 """
 
+from api.mode_api import router as mode_router
+from tools.retriever import get_retriever, VECTOR_STORE_AVAILABLE
+from agents.executor_agent import format_questions_response
+from utils.memory_manager import get_memory_manager
+from utils.conversation_manager import get_conversation_manager
+from graphs.workflow_server import run_workflow_async_server
+from graphs.state import create_initial_state
 import asyncio
 import json
 import os
@@ -21,13 +28,6 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from graphs.state import create_initial_state
-from graphs.workflow_server import run_workflow_async_server
-from utils.conversation_manager import get_conversation_manager
-from utils.memory_manager import get_memory_manager
-from agents.executor_agent import format_questions_response
-from tools.retriever import get_retriever, VECTOR_STORE_AVAILABLE
 
 
 # ==================== 应用初始化 ====================
@@ -115,7 +115,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     conv_data = conv_manager.load_conversation(new_conv_id)
                     if conv_data:
                         msgs = conv_data.get("messages", [])
-                        history = [{"role": m["role"], "content": m["content"]} for m in msgs]
+                        history = [
+                            {"role": m["role"], "content": m["content"]} for m in msgs]
                         sess_time2 = datetime.now().strftime("%Y%m%d_%H%M%S")
                         sessions[session_id] = {
                             "state": create_initial_state("", sess_time2),
@@ -168,40 +169,56 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 step_timers: Dict[str, datetime] = {}
                 current_steps: List[Dict] = []
 
-                async def step_callback(step_name: str, detail: str, params: dict = None):
+                async def step_callback(step_name: str, detail: str, params: dict = None, step_id: str = None, parent_id: str = None):
                     """工作流步骤回调：推送步骤状态到客户端"""
                     now = datetime.now()
+                    s_id = step_id or step_name
 
-                    # 关闭上一个 running 步骤
+                    # 关闭上一个 running 步骤 (如果是同一层级的新步骤，或者没有任何指定)
                     for s in current_steps:
-                        if s["status"] == "running":
-                            elapsed = (now - step_timers.get(s["step"], now)).total_seconds()
+                        if s["status"] == "running" and s["step"] != s_id:
+                            # 简化处理：默认只自动关闭同级，为了避免复杂的状态跟踪，直接由前端覆盖也行
+                            # 但如果要计算准确时间，还需要完善。这里保持原来的简单逻辑
+                            elapsed = (
+                                now - step_timers.get(s["step"], now)).total_seconds()
                             s["status"] = "done"
                             s["elapsed"] = f"{elapsed:.1f}s"
                             await websocket.send_json({
                                 "type": "agent_step",
-                                "step": s["step"],
+                                "step": s["step_name"],
                                 "status": "done",
                                 "detail": s.get("detail", ""),
-                                "elapsed": s["elapsed"]
+                                "elapsed": s["elapsed"],
+                                "step_id": s["step"],
+                                "parent_id": s.get("parent_id")
                             })
 
-                    # 添加新步骤
-                    new_step = {
-                        "step": step_name,
-                        "status": "running",
-                        "detail": detail,
-                        "elapsed": None
-                    }
-                    current_steps.append(new_step)
-                    step_timers[step_name] = now
+                    # 记录新步骤状态
+                    existing_step = next(
+                        (s for s in current_steps if s["step"] == s_id), None)
+                    if not existing_step:
+                        new_step = {
+                            "step": s_id,
+                            "step_name": step_name,
+                            "parent_id": parent_id,
+                            "status": "running",
+                            "detail": detail,
+                            "elapsed": None
+                        }
+                        current_steps.append(new_step)
+                        step_timers[s_id] = now
+                    else:
+                        existing_step["status"] = "running"
+                        existing_step["detail"] = detail
 
                     await websocket.send_json({
                         "type": "agent_step",
                         "step": step_name,
                         "status": "running",
                         "detail": detail,
-                        "elapsed": None
+                        "elapsed": None,
+                        "step_id": step_id,
+                        "parent_id": parent_id
                     })
 
                     if params:
@@ -210,12 +227,22 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                             "params": params
                         })
 
+                # ---- 辩论回调 ----
+                async def debate_callback(role: str, avatar: str, content: str):
+                    await websocket.send_json({
+                        "type": "debate_stream",
+                        "role": role,
+                        "avatar": avatar,
+                        "content": content
+                    })
+
                 # ---- 运行工作流 ----
                 try:
                     result = await run_workflow_async_server(
                         state,
                         chat_history,
-                        status_callback=step_callback
+                        status_callback=step_callback,
+                        debate_callback=debate_callback
                     )
                 except Exception as e:
                     await websocket.send_json({
@@ -228,22 +255,41 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 now = datetime.now()
                 for s in current_steps:
                     if s["status"] == "running":
-                        elapsed = (now - step_timers.get(s["step"], now)).total_seconds()
+                        elapsed = (
+                            now - step_timers.get(s["step"], now)).total_seconds()
                         await websocket.send_json({
                             "type": "agent_step",
-                            "step": s["step"],
+                            "step": s["step_name"],
                             "status": "done",
                             "detail": s.get("detail", ""),
-                            "elapsed": f"{elapsed:.1f}s"
+                            "elapsed": f"{elapsed:.1f}s",
+                            "step_id": s["step"],
+                            "parent_id": s.get("parent_id")
                         })
 
                 # ---- 构建最终响应 ----
                 final_response = result.get("final_response", "")
                 if not final_response:
                     if result.get("draft_questions"):
-                        final_response = format_questions_response(result["draft_questions"])
+                        final_response = format_questions_response(
+                            result["draft_questions"])
                     else:
                         final_response = "任务处理完成，但未能生成有效结果，请重试。"
+
+                # ---- 检测模式切换信号 ----
+                mode_switch = result.get("mode_switch")
+                mode_transition = result.get("mode_transition")
+                print(
+                    f"[DEBUG] Server mode_switch={mode_switch}, mode_transition={mode_transition}")
+                if mode_switch and mode_transition in ["enter", "switch"]:
+                    # 发送模式切换建议给前端
+                    print(
+                        f"[DEBUG] Sending mode_suggest to frontend: {mode_switch}")
+                    await websocket.send_json({
+                        "type": "mode_suggest",
+                        "suggested_mode": mode_switch,
+                        "transition": mode_transition
+                    })
 
                 chart_history_updated = chat_history + [{
                     "role": "assistant",
@@ -255,7 +301,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 current_conv_id = sess["conversation_id"]
                 try:
                     conv_manager.add_message(current_conv_id, "user", content)
-                    conv_manager.add_message(current_conv_id, "assistant", final_response)
+                    conv_manager.add_message(
+                        current_conv_id, "assistant", final_response)
                 except Exception:
                     pass
 
@@ -492,7 +539,12 @@ async def transcribe_audio(file: UploadFile = File(...)):
 # ==================== 静态文件服务 ====================
 
 # 先挂载 API 路由，再挂载静态文件（顺序重要）
-frontend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend")
+frontend_dir = os.path.join(os.path.dirname(
+    os.path.abspath(__file__)), "frontend")
+
+# 注册模式切换 API
+app.include_router(mode_router)
+
 
 @app.get("/")
 async def serve_index():

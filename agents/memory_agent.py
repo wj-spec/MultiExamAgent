@@ -173,6 +173,7 @@ def memory_recall_node(state: AgentState) -> AgentState:
     记忆召回节点
 
     从长期记忆中检索相关的用户偏好和历史经验。
+    **重要**：只有当意图为命题时，才检索命题相关的记忆和偏好。
 
     Args:
         state: 当前状态
@@ -180,21 +181,34 @@ def memory_recall_node(state: AgentState) -> AgentState:
     Returns:
         更新后的状态
     """
-    new_state = add_status_message(state, "💡 正在回忆您的偏好...")
+    new_state = add_status_message(state, "正在回忆您的偏好...")
 
-    # 检索长期记忆
-    memories = retrieve_memory(state["user_input"], top_k=5)
+    # 获取当前意图
+    intent = state.get("intent", "chat")
 
-    # 同时获取用户偏好摘要
-    preferences = get_user_preferences()
+    # 只有在命题意图时才检索命题相关的记忆和偏好
+    if intent == "proposition":
+        # 检索长期记忆
+        memories = retrieve_memory(state["user_input"], top_k=5)
 
-    # 更新状态
-    new_state = dict(new_state)
-    new_state["retrieved_long_term_memory"] = memories
+        # 同时获取用户偏好摘要
+        preferences = get_user_preferences()
 
-    if preferences:
-        pref_str = ", ".join([f"{k}: {v}" for k, v in preferences.items()])
-        new_state = add_status_message(new_state, f"📝 找到偏好: [{pref_str}]")
+        new_state = dict(new_state)
+        new_state["retrieved_long_term_memory"] = memories
+
+        if preferences:
+            pref_str = ", ".join([f"{k}: {v}" for k, v in preferences.items()])
+            new_state = add_status_message(new_state, f"找到偏好: [{pref_str}]")
+
+        if memories:
+            new_state = add_status_message(
+                new_state, f"找到 {len(memories)} 条相关历史记忆")
+    else:
+        # 非命题意图时，不检索命题相关的记忆
+        new_state = dict(new_state)
+        new_state["retrieved_long_term_memory"] = []
+        new_state = add_status_message(new_state, "当前为闲聊模式，跳过记忆召回")
 
     return new_state
 
@@ -204,6 +218,7 @@ def cognitive_node(state: AgentState) -> AgentState:
     认知分析节点
 
     分析用户需求，判断是否完整，并决定后续行动。
+    支持从 proposition_context 继承上一次的命题参数。
 
     Args:
         state: 当前状态
@@ -211,7 +226,7 @@ def cognitive_node(state: AgentState) -> AgentState:
     Returns:
         更新后的状态
     """
-    new_state = add_status_message(state, "🔍 正在分析需求完整性...")
+    new_state = add_status_message(state, "正在分析需求完整性...")
 
     # 创建认知 Agent 并分析
     agent = MemoryCognitiveAgent()
@@ -220,6 +235,23 @@ def cognitive_node(state: AgentState) -> AgentState:
         chat_history=state["chat_history"],
         long_term_memory=state["retrieved_long_term_memory"]
     )
+
+    # 检查是否有继承的命题上下文
+    proposition_context = state.get("proposition_context", "")
+    if proposition_context and not result["is_complete"]:
+        # 尝试从 proposition_context 补全参数
+        try:
+            import json
+            inherited_params = json.loads(proposition_context)
+            if isinstance(inherited_params, dict):
+                # 合并继承的参数
+                for key, value in inherited_params.items():
+                    if key in result["extracted_params"] and not result["extracted_params"][key]:
+                        result["extracted_params"][key] = value
+                new_state = add_status_message(
+                    new_state, f"从上下文继承参数: {inherited_params}")
+        except (json.JSONDecodeError, TypeError):
+            pass
 
     # 更新状态
     new_state = dict(new_state)
@@ -234,7 +266,7 @@ def cognitive_node(state: AgentState) -> AgentState:
         params = result["extracted_params"]
         new_state = add_status_message(
             new_state,
-            f"✅ 需求完整: 知识点={params.get('topic')}, "
+            f"需求完整: 知识点={params.get('topic')}, "
             f"题型={params.get('question_type')}, "
             f"难度={params.get('difficulty')}, "
             f"数量={params.get('count')}"
@@ -244,7 +276,7 @@ def cognitive_node(state: AgentState) -> AgentState:
         missing = result["missing_info"]
         new_state = add_status_message(
             new_state,
-            f"❓ 信息不完整，缺失: {', '.join(missing)}"
+            f"信息不完整，缺失: {', '.join(missing)}"
         )
 
     return new_state
@@ -269,6 +301,7 @@ def ask_user_node(state: AgentState) -> AgentState:
     new_state["next_node"] = "end"
     new_state["should_continue"] = False
 
-    new_state = add_status_message(new_state, f"🤔 向用户追问: {state['follow_up_question']}")
+    new_state = add_status_message(
+        new_state, f"🤔 向用户追问: {state['follow_up_question']}")
 
     return new_state

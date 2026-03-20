@@ -19,7 +19,8 @@ class Settings(BaseSettings):
     default_model: str = "gpt-4o-mini"
 
     # 嵌入模型配置
-    embedding_provider: Literal["openai", "dashscope", "huggingface", "ollama"] = "openai"
+    embedding_provider: Literal["openai",
+                                "dashscope", "huggingface", "ollama"] = "openai"
     embedding_model: str = "text-embedding-ada-002"
     embedding_api_key: str = ""  # 留空则使用 openai_api_key
     embedding_api_base: str = ""  # 留空则使用 openai_api_base
@@ -42,6 +43,18 @@ class Settings(BaseSettings):
     asr_api_base: str = "http://172.168.0.200:8889/v1"
     asr_api_key: str = "EMPTY"
     asr_model: str = "Qwen/Qwen2-Audio-7B-Instruct"
+
+    # 多源检索配置
+    tavily_api_key: str = ""
+
+    # Reranker 配置
+    reranker_provider: Literal["none", "cohere", "huggingface", "llm"] = "none"
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    cohere_api_key: str = ""
+
+    # Browser Agent 配置
+    browser_headless: bool = True
+    browser_timeout: int = 30000
 
     class Config:
         env_file = ".env"
@@ -77,11 +90,13 @@ def get_embedding_config() -> dict:
 
     # 根据不同 provider 设置不同的配置
     if settings.embedding_provider == "openai":
-        config["api_key"] = settings.embedding_api_key or settings.openai_api_key or os.getenv("OPENAI_API_KEY", "")
+        config["api_key"] = settings.embedding_api_key or settings.openai_api_key or os.getenv(
+            "OPENAI_API_KEY", "")
         config["base_url"] = settings.embedding_api_base or settings.openai_api_base
     elif settings.embedding_provider == "dashscope":
         # 阿里云灵积（通义）
-        config["api_key"] = settings.embedding_api_key or os.getenv("DASHSCOPE_API_KEY", "")
+        config["api_key"] = settings.embedding_api_key or os.getenv(
+            "DASHSCOPE_API_KEY", "")
     elif settings.embedding_provider == "huggingface":
         # HuggingFace 本地模型
         config["model_name"] = settings.embedding_model
@@ -134,3 +149,27 @@ def get_asr_client():
         api_key=settings.asr_api_key or "EMPTY",
         base_url=settings.asr_api_base,
     )
+
+
+def get_tavily_config() -> dict:
+    """获取 Tavily 搜索配置"""
+    return {
+        "api_key": settings.tavily_api_key or os.getenv("TAVILY_API_KEY", ""),
+    }
+
+
+def get_reranker_config() -> dict:
+    """获取 Reranker 配置"""
+    return {
+        "provider": settings.reranker_provider,
+        "model": settings.reranker_model,
+        "cohere_api_key": settings.cohere_api_key or os.getenv("COHERE_API_KEY", ""),
+    }
+
+
+def get_browser_config() -> dict:
+    """获取 Browser Agent 配置"""
+    return {
+        "headless": settings.browser_headless,
+        "timeout": settings.browser_timeout,
+    }

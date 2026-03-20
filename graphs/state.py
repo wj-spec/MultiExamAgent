@@ -50,10 +50,11 @@ class AgentState(TypedDict):
     """
     LangGraph 全局状态定义
 
-    包含三个主要部分：
+    包含四个主要部分：
     1. 输入输出：用户输入、对话历史、最终响应
-    2. 路由状态：意图识别结果
-    3. 业务状态：记忆、需求分析、执行、生成与反思状态
+    2. 意图分层系统：主要意图、命题需求、模式切换
+    3. 路由状态：意图识别结果
+    4. 业务状态：记忆、需求分析、执行、生成与反思状态
     """
 
     # === 输入输出 ===
@@ -61,8 +62,15 @@ class AgentState(TypedDict):
     chat_history: Annotated[List[dict], operator.add]  # 短期记忆（对话历史）
     final_response: str  # 最终输出给用户的响应
 
+    # === 意图分层系统 ===
+    primary_intent: Literal["proposition", "chat", "grading"]  # 主要意图
+    proposition_needed: bool  # 是否需要调用命题 Agent
+    proposition_context: str  # 命题上下文（用于"继续"等场景，存储上次命题参数）
+    current_mode: Literal["proposition", "chat", "mixed"]  # 当前会话模式
+    mode_transition: Literal["enter", "exit", "none"]  # 模式切换信号
+
     # === 路由状态 ===
-    intent: Literal["proposition", "grading", "chat"]  # 意图类型
+    intent: Literal["proposition", "grading", "chat"]  # 意图类型（兼容旧版）
     routing_reason: str  # 路由决策原因
 
     # === 话题追踪（用于意图识别优化）===
@@ -83,11 +91,21 @@ class AgentState(TypedDict):
     current_step: str  # 当前步骤名称
     retrieved_knowledge: str  # RAG检索到的业务知识
 
+    # === 多源检索状态 (Phase 7) ===
+    route_decision: dict  # 路由决策详情
+    search_route: str  # 检索路由类型: local/api/browser/hybrid
+    search_query: str  # 改写后的搜索查询
+    search_sources: List[dict]  # 检索来源信息列表
+
     # === 生成与反思状态 ===
     draft_questions: List[QuestionItem]  # 生成的试题草稿
     audit_feedback: str  # 质检反馈
     revision_count: int  # 修订次数
     max_revisions: int  # 最大修订次数
+
+    # === 辩论与共识状态 ===
+    debate_history: Annotated[List[dict], operator.add]  # 记录专家互怼的过程
+    consensus_reached: bool  # 当前是否达成共识
 
     # === 控制流状态 ===
     should_continue: bool  # 是否继续执行
@@ -119,6 +137,13 @@ def create_initial_state(user_input: str, session_id: str = None) -> AgentState:
         chat_history=[],
         final_response="",
 
+        # 意图分层系统
+        primary_intent="chat",
+        proposition_needed=False,
+        proposition_context="",
+        current_mode="chat",
+        mode_transition="none",
+
         # 路由状态
         intent="chat",
         routing_reason="",
@@ -147,11 +172,21 @@ def create_initial_state(user_input: str, session_id: str = None) -> AgentState:
         current_step="",
         retrieved_knowledge="",
 
+        # 多源检索状态
+        route_decision={},
+        search_route="",
+        search_query="",
+        search_sources=[],
+
         # 生成与反思
         draft_questions=[],
         audit_feedback="",
         revision_count=0,
         max_revisions=3,
+
+        # 辩论与共识
+        debate_history=[],
+        consensus_reached=False,
 
         # 控制流
         should_continue=True,

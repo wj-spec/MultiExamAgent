@@ -11,6 +11,13 @@ const Chat = (() => {
   let typingRowEl = null;
   let lastUserMessage = '';  // 最后一条用户消息 (用于重新生成)
 
+  // 翻页重生成支持
+  let isRegenerating = false;
+  let currentAssistantRow = null; 
+  // 维护当前正在操作的 AI 气泡的数据版本 { versions: [], currentIndex: 0 }
+  // 实际数据结构我们可以挂载在 DOM 上，或者全局维护
+
+
   // marked.js 配置
   const markedInstance = typeof marked !== 'undefined' ? marked : null;
   if (markedInstance) {
@@ -24,6 +31,11 @@ const Chat = (() => {
       breaks: true,
       gfm: true,
     });
+  }
+
+  // 初始化 Mermaid (如果存在)
+  if (typeof mermaid !== 'undefined') {
+    mermaid.initialize({ startOnLoad: false, theme: 'default' });
   }
 
   function init(sendCallback, showResultCallback) {
@@ -115,64 +127,248 @@ const Chat = (() => {
     return row;
   }
 
-  /** 显示打字指示 */
-  function showTyping() {
+  /** 标记是否处于重生成状态 */
+  function setRegenerating(state) {
+    isRegenerating = state;
+  }
+
+  /** 显示打字指示 (内联思考块) */
+  function showTyping(isRegen = false) {
     isWaitingResponse = true;
     sendBtnEl.disabled = true;
 
-    typingRowEl = document.createElement('div');
-    typingRowEl.className = 'message-row assistant';
-    typingRowEl.innerHTML = `
-      <div class="message-avatar">🤖</div>
-      <div class="message-bubble">
-        <div class="typing-indicator">
-          <span></span><span></span><span></span>
+    const thoughtHtml = `
+      <div class="inline-thought-process">
+        <div class="thinking-header" style="display:flex; gap:8px; align-items:center; user-select:none; font-size:12px; color:var(--text-secondary); background:rgba(255,255,255,0.02); padding:8px 12px; border-radius:6px; border:var(--glass-border);">
+          <div class="thinking-status" style="display:flex; align-items:center; gap:8px;">
+             <span class="spinner-border spinner-border-sm text-brand" style="width:12px; height:12px; border-width:2px;"></span>
+             <span class="thinking-text">🤖 深入思考中 · 检索知识...</span>
+          </div>
+          <span class="chevron" style="margin-left:auto; transition:transform 0.3s; transform:rotate(180deg);">▼</span>
+        </div>
+        <div class="thinking-body" style="margin-top:8px; border-top:1px solid var(--border); padding-top:8px; display:flex; flex-direction:column; gap:10px;">
+          <!-- 执行步骤 -->
+          <div class="panel-section" style="padding:0; border:none;">
+            <div class="panel-section-title" style="font-size:10px; margin-bottom:6px;">执行步骤</div>
+            <div class="step-list"></div>
+          </div>
+          <!-- 专家组审核 -->
+          <div class="war-room-section hidden panel-section" style="padding:0; border:none;">
+            <div class="panel-section-title" style="display:flex; align-items:center; gap:6px; font-size:10px; margin-bottom:6px;">
+               ⚔️ 专家组审核
+               <span class="debate-status-dot" style="width:6px; height:6px; background:var(--brand); border-radius:50%; box-shadow:0 0 4px var(--brand); animation:pulse 1.5s infinite;"></span>
+            </div>
+            <div class="debate-container debate-bubbles"></div>
+          </div>
         </div>
       </div>
     `;
-    messageListEl.appendChild(typingRowEl);
+
+    if (isRegen && currentAssistantRow) {
+      const bubble = currentAssistantRow.querySelector('.message-bubble');
+      if (bubble) {
+        bubble.innerHTML = thoughtHtml;
+        const actions = currentAssistantRow.querySelector('.msg-actions-container');
+        if (actions) actions.style.display = 'none'; 
+        bindThoughtProcessEvents(bubble.querySelector('.inline-thought-process'));
+      }
+    } else {
+      typingRowEl = document.createElement('div');
+      typingRowEl.className = 'message-row assistant';
+      typingRowEl.innerHTML = `
+        <div class="message-avatar">🤖</div>
+        <div class="message-bubble">${thoughtHtml}</div>
+      `;
+      messageListEl.appendChild(typingRowEl);
+      bindThoughtProcessEvents(typingRowEl.querySelector('.inline-thought-process'));
+    }
     scrollToBottom();
   }
 
-  /** 移除打字指示，替换为实际回复 */
+  function bindThoughtProcessEvents(container) {
+    if (!container) return;
+    const header = container.querySelector('.thinking-header');
+    const body = container.querySelector('.thinking-body');
+    const chevron = container.querySelector('.chevron');
+    if (header && body && chevron) {
+      header.style.cursor = 'pointer';
+      // 移除旧的监听器防止重复绑定
+      header.replaceWith(header.cloneNode(true));
+      const newHeader = container.querySelector('.thinking-header');
+      newHeader.addEventListener('click', () => {
+        body.classList.toggle('hidden');
+        newHeader.querySelector('.chevron').style.transform = body.classList.contains('hidden') ? 'rotate(0deg)' : 'rotate(180deg)';
+      });
+    }
+  }
+
+  /** 获取当前活跃的思考块 DOM，供 panel.js 渲染使用 */
+  function getActiveThoughtContainer() {
+    if (isRegenerating && currentAssistantRow) {
+      return currentAssistantRow.querySelector('.inline-thought-process');
+    }
+    if (typingRowEl) {
+      return typingRowEl.querySelector('.inline-thought-process');
+    }
+    return null;
+  }
+
+  /** 移除打字指示，替换为实际回复 (支持多版本) */
   function showAssistantMessage(content, resultData) {
     isWaitingResponse = false;
     sendBtnEl.disabled = false;
 
-    // 移除打字指示
+    // 捕获旧的思维链路 DOM 并克隆
+    let oldThoughtDOM = null;
+    if (isRegenerating && currentAssistantRow) {
+      const activeBubble = currentAssistantRow.querySelector('.message-bubble');
+      const processEl = activeBubble?.querySelector('.inline-thought-process');
+      if (processEl) oldThoughtDOM = processEl.cloneNode(true);
+    } else if (typingRowEl) {
+      const processEl = typingRowEl.querySelector('.inline-thought-process');
+      if (processEl) oldThoughtDOM = processEl.cloneNode(true);
+    }
+
+    // 清理克隆过来的 DOM 的动画和状态，将其收起
+    if (oldThoughtDOM) {
+       const spinner = oldThoughtDOM.querySelector('.spinner-border');
+       if (spinner) spinner.remove();
+       const title = oldThoughtDOM.querySelector('.thinking-text');
+       if (title) title.textContent = '🤖 思考过程记录 (\u5df2\u5b8c\u6210)';
+       const dot = oldThoughtDOM.querySelector('.debate-status-dot');
+       if (dot) dot.style.animation = 'none';
+
+       // 默认折叠它
+       const body = oldThoughtDOM.querySelector('.thinking-body');
+       if (body) body.classList.add('hidden');
+       const chevron = oldThoughtDOM.querySelector('.chevron');
+       if (chevron) chevron.style.transform = 'rotate(0deg)';
+       
+       // 重新绑定克隆节点的点击事件
+       bindThoughtProcessEvents(oldThoughtDOM);
+    }
+
+    // 移除独立的打字指示容器
     if (typingRowEl) {
       typingRowEl.remove();
       typingRowEl = null;
     }
 
-    const row = document.createElement('div');
-    row.className = 'message-row assistant';
+    let row = null;
+    let bubbleInfo = null;
 
-    const avatar = document.createElement('div');
-    avatar.className = 'message-avatar';
-    avatar.textContent = '🤖';
+    if (isRegenerating && currentAssistantRow) {
+      row = currentAssistantRow;
+      bubbleInfo = row.__bubbleInfo;
+      bubbleInfo.versions.push({ content, resultData, thoughtDOM: oldThoughtDOM });
+      bubbleInfo.currentIndex = bubbleInfo.versions.length - 1;
+      isRegenerating = false;
+    } else {
+      row = document.createElement('div');
+      row.className = 'message-row assistant';
+      
+      const avatar = document.createElement('div');
+      avatar.className = 'message-avatar';
+      avatar.textContent = '🤖';
+      
+      const bubble = document.createElement('div');
+      bubble.className = 'message-bubble';
+      
+      const actionsContainer = document.createElement('div');
+      actionsContainer.className = 'msg-actions-container';
 
-    const bubble = document.createElement('div');
-    bubble.className = 'message-bubble';
+      row.appendChild(avatar);
+      row.appendChild(bubble);
+      row.appendChild(actionsContainer);
 
-    // Markdown 渲染
-    bubble.innerHTML = renderMarkdown(content);
+      messageListEl.appendChild(row);
 
-    // 代码高亮后处理
-    if (typeof hljs !== 'undefined') {
-      bubble.querySelectorAll('pre code').forEach(hljs.highlightElement);
+      bubbleInfo = {
+        versions: [{ content, resultData, thoughtDOM: oldThoughtDOM }],
+        currentIndex: 0
+      };
+      row.__bubbleInfo = bubbleInfo;
+      currentAssistantRow = row;
     }
 
-    // 操作工具栏
-    const actions = buildMsgActions(content, resultData);
-
-    row.appendChild(avatar);
-    row.appendChild(bubble);
-    row.appendChild(actions);
-
-    messageListEl.appendChild(row);
+    renderBubbleVersion(row, bubbleInfo);
+    
     scrollToBottom();
     return row;
+  }
+
+  /** 渲染特定版本的 AI 回复 */
+  function renderBubbleVersion(row, bubbleInfo) {
+    const { versions, currentIndex } = bubbleInfo;
+    const { content, resultData, thoughtDOM } = versions[currentIndex];
+    
+    const bubble = row.querySelector('.message-bubble');
+    const actionsContainer = row.querySelector('.msg-actions-container');
+
+    // ---- 渲染主体内容 ----
+    bubble.innerHTML = '';
+    
+    // 如果存在思考过程 DOM，附加在上方
+    if (thoughtDOM) {
+      bubble.appendChild(thoughtDOM);
+    }
+    
+    // 渲染 Markdown 正文
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'markdown-body';
+    contentDiv.style.marginTop = thoughtDOM ? '12px' : '0';
+    contentDiv.innerHTML = renderMarkdown(content);
+    bubble.appendChild(contentDiv);
+
+    // 代码高亮
+    if (typeof hljs !== 'undefined') {
+      contentDiv.querySelectorAll('pre code').forEach(hljs.highlightElement);
+    }
+
+    // 渲染图谱
+    if (typeof mermaid !== 'undefined' && resultData?.knowledge_topology) {
+      renderMermaidInBubble(contentDiv, resultData);
+    }
+
+    // ---- 渲染顶部翻页器 (如果有多个版本) ----
+    if (versions.length > 1) {
+      const pagination = document.createElement('div');
+      pagination.className = 'message-pagination';
+      
+      const prevBtn = document.createElement('button');
+      prevBtn.className = 'page-btn page-prev';
+      prevBtn.textContent = '◀';
+      prevBtn.disabled = currentIndex === 0;
+      prevBtn.onclick = () => {
+        bubbleInfo.currentIndex--;
+        renderBubbleVersion(row, bubbleInfo);
+      };
+
+      const dot = document.createElement('span');
+      dot.className = 'page-indicator';
+      dot.textContent = `${currentIndex + 1} / ${versions.length}`;
+
+      const nextBtn = document.createElement('button');
+      nextBtn.className = 'page-btn page-next';
+      nextBtn.textContent = '▶';
+      nextBtn.disabled = currentIndex === versions.length - 1;
+      nextBtn.onclick = () => {
+        bubbleInfo.currentIndex++;
+        renderBubbleVersion(row, bubbleInfo);
+      };
+
+      pagination.appendChild(prevBtn);
+      pagination.appendChild(dot);
+      pagination.appendChild(nextBtn);
+      
+      // 插入到 bubble 最开头
+      bubble.insertBefore(pagination, bubble.firstChild);
+    }
+
+    // ---- 渲染底部操作栏 ----
+    const newActions = buildMsgActions(content, resultData);
+    actionsContainer.innerHTML = ''; // 清空
+    actionsContainer.appendChild(newActions);
   }
 
   /** 渲染错误消息 */
@@ -287,7 +483,7 @@ const Chat = (() => {
       '重新生成回复',
       () => {
         if (lastUserMessage && onSendMessage && !isWaitingResponse) {
-          onSendMessage(lastUserMessage);
+          onSendMessage(lastUserMessage, true);
         }
       }
     );
@@ -346,6 +542,69 @@ const Chat = (() => {
     bar.appendChild(btnResult);
   }
 
+  /**
+   * 将带有 ```mermaid 的代码块渲染成 SVG 图像
+   */
+  async function renderMermaidInBubble(bubbleEl, resultData) {
+    if (typeof mermaid === 'undefined') return;
+
+    // 先检查传入的 resultData 中是否有直接带知识拓扑
+    let topologyCode = resultData?.knowledge_topology || null;
+
+    // 如果 markdown 中本身混入了 mermaid 代码块
+    const mermaidNodes = bubbleEl.querySelectorAll('code.language-mermaid');
+    
+    // 如果没有自带节点且传了拓扑数据，我们手动给它加一个
+    if (mermaidNodes.length === 0 && topologyCode) {
+        // 尝试解析纯代码部分
+        const match = topologyCode.match(/```mermaid[\s\S]*?\n([\s\S]+?)```/);
+        if (match) {
+            topologyCode = match[1];
+        } else {
+            topologyCode = topologyCode.replace(/```mermaid/g, '').replace(/```/g, '');
+        }
+
+        const container = document.createElement('div');
+        container.className = 'mermaid-chart-container';
+        container.innerHTML = `
+            <div class="mermaid-title">🧠 GraphRAG 知识溯源</div>
+            <div class="mermaid-content"></div>
+        `;
+        bubbleEl.appendChild(container);
+        
+        try {
+            const id = 'mermaid-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+            const { svg } = await mermaid.render(id, topologyCode);
+            container.querySelector('.mermaid-content').innerHTML = svg;
+        } catch (err) {
+            console.error('Mermaid render error:', err);
+            container.innerHTML = '<div style="color:red;font-size:12px;">图表渲染失败</div>';
+        }
+        return;
+    }
+
+    // 处理 markdown 原本解析到的所有 mermaid 代码块
+    for (const codeEl of Array.from(mermaidNodes)) {
+      const preEl = codeEl.parentElement;
+      if (!preEl) continue;
+      const codeText = codeEl.textContent;
+      
+      const container = document.createElement('div');
+      container.className = 'mermaid-chart-container';
+      
+      try {
+        const id = 'mermaid-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+        const { svg } = await mermaid.render(id, codeText);
+        container.innerHTML = svg;
+        preEl.replaceWith(container);
+      } catch (err) {
+        console.error('Mermaid render error:', err);
+        container.innerHTML = '<div style="color:red;font-size:12px;">图表渲染失败</div>';
+        preEl.replaceWith(container);
+      }
+    }
+  }
+
   // ---- 工具函数 ----
 
   function renderMarkdown(content) {
@@ -385,5 +644,7 @@ const Chat = (() => {
     restoreMessages,
     scrollToBottom,
     attachResultToLastMessage,
+    setRegenerating,
+    getActiveThoughtContainer,
   };
 })();

@@ -1,0 +1,24 @@
+{
+  "id": "conv_20260320_154817_516e98",
+  "title": "对话 2026-03-20 15:48",
+  "created_at": "2026-03-20T15:48:17.805186",
+  "updated_at": "2026-03-20T15:48:43.447487",
+  "message_count": 2,
+  "metadata": {},
+  "messages": [
+    {
+      "id": "msg_90243688",
+      "role": "user",
+      "content": "帮我出5道高中数学导数的选择题，难度中等，要求考察函数的单调性与极值",
+      "timestamp": "2026-03-20T15:48:43.444968",
+      "metadata": {}
+    },
+    {
+      "id": "msg_8b9d0d9d",
+      "role": "assistant",
+      "content": "# 生成的试题\n\n## 第 1 题\n\n**题型**: 选择题\n**难度**: 中等\n**知识点**: 导数\n\n函数 f(x) = x^3 - 3x 的导数是？\n\nA. 3x^2 - 3\nB. 3x^2 + 3\nC. x^2 - 3\nD. 3x^2 - 3x\n\n<details>\n<summary>点击查看答案与解析</summary>\n\n**答案**: A\n\n**解析**: 根据导数的基本规则，x^n 的导数为 n*x^(n-1)，因此 f'(x) = 3x^2 - 3。\n\n</details>\n\n---\n\n## 第 2 题\n\n**题型**: 选择题\n**难度**: 中等\n**知识点**: 导数\n\n已知函数 f(x) = sin(x) + cos(x)，则 f'(π/4) 的值为？\n\nA. 0\nB. √2\nC. -√2\nD. 1\n\n<details>\n<summary>点击查看答案与解析</summary>\n\n**答案**: A\n\n**解析**: f'(x) = cos(x) - sin(x)，代入 x = π/4 得到 f'(π/4) = cos(π/4) - sin(π/4) = 0。\n\n</details>\n\n---\n\n## 第 3 题\n\n**题型**: 选择题\n**难度**: 中等\n**知识点**: 导数\n\n若 f(x) = e^{2x}，则 f'(x) 是？\n\nA. 2e^{2x}\nB. e^{2x}\nC. 2e^x\nD. e^x\n\n<details>\n<summary>点击查看答案与解析</summary>\n\n**答案**: A\n\n**解析**: 根据导数的链式法则，e^{u} 的导数为 u' * e^u，这里 u = 2x，因此 f'(x) = 2e^{2x}。\n\n</details>\n\n---\n\n## 第 4 题\n\n**题型**: 选择题\n**难度**: 中等\n**知识点**: 导数\n\n函数 f(x) = ln(x^2 + 1) 的导数是？\n\nA. (2x)/(x^2 + 1)\nB. (x)/(x^2 + 1)\nC. 2x/(x^2 + 1)\nD. 2/(x^2 + 1)\n\n<details>\n<summary>点击查看答案与解析</summary>\n\n**答案**: A\n\n**解析**: 根据导数的链式法则，ln(u) 的导数为 u'/u，这里 u = x^2 + 1，因此 f'(x) = (2x)/(x^2 + 1)。\n\n</details>\n\n---\n\n## 第 5 题\n\n**题型**: 选择题\n**难度**: 中等\n**知识点**: 导数\n\n设 f(x) = x^2 * sin(x)，则 f'(x) 是？\n\nA. 2x*sin(x) + x^2*cos(x)\nB. 2x*sin(x) - x^2*cos(x)\nC. 2x*cos(x) + x^2*sin(x)\nD. 2x*sin(x) + x^2*sin(x)\n\n<details>\n<summary>点击查看答案与解析</summary>\n\n**答案**: A\n\n**解析**: 根据乘积法则，(u*v)' = u'v + uv'，这里 u = x^2，v = sin(x)，因此 f'(x) = 2x*sin(x) + x^2*cos(x)。\n\n</details>\n\n---\n\n",
+      "timestamp": "2026-03-20T15:48:43.447487",
+      "metadata": {}
+    }
+  ]
+}

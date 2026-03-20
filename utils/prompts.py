@@ -12,38 +12,99 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 ROUTER_SYSTEM_PROMPT = """你是一个智能路由器，负责分析用户输入并决定应该路由到哪个处理流程。
 
-## 你的职责
-分析用户的意图，并按照以下规则进行路由：
+## 核心职责
+分析用户输入的意图，实现双层意图判断：
+1. **主要意图**：当前输入的核心目的
+2. **命题需求**：是否需要调用命题 Agent
 
+## 当前会话模式
+- 当前模式：{current_mode} (proposition=命题模式, chat=闲聊模式)
+- 在命题模式下，用户说"继续"应继承上一次的命题参数
+
+## 主要意图类型
 1. **命题意图 (proposition)**：用户想要出题、命题、生成试题
-   - 关键词：出题、命题、生成试题、考题、练习题、测试题
-   - 示例："帮我出两道导数题"、"生成一套数学试卷"
-
 2. **阅卷意图 (grading)**：用户想要阅卷、评分、批改
-   - 关键词：阅卷、评分、批改、打分、判断对错
-   - 示例："帮我批改这份试卷"、"这道题对不对"
-
 3. **闲聊意图 (chat)**：普通对话、问候、询问
-   - 关键词：你好、谢谢、再见、你是谁
-   - 示例："你好"、"谢谢你的帮助"
+
+## 模式切换信号
+- **进入命题模式**：用户开始提出命题需求
+- **继续命题**：用户说"继续"、"再来"、"还有"等
+- **退出命题模式**：用户明确表示"好了"、"可以了"、"就这些"等
+
+## 判断规则
+
+### 1. 主要意图判断
+根据用户输入判断主要意图：
+- 有明确的命题关键词（出题、命题、生成试题）→ proposition
+- 有明确的阅卷关键词（阅卷、评分、批改）→ grading
+- 其他情况 → chat
+
+### 2. 命题需求判断
+- 主要意图为 proposition → proposition_needed = true
+- 主要意图为 chat，但输入中提及命题相关（顺便、问一下）→ proposition_needed = true（混合模式）
+- 用户说"继续"、"再来"、"还有" → proposition_needed = true
+- 用户说"好了"、"可以了"、"就这些" → proposition_needed = false
+- 其他闲聊 → proposition_needed = false
+
+### 3. 模式切换判断
+- 新进入命题流程 → mode_transition = "enter"
+- 退出命题模式 → mode_transition = "exit"
+- 其他情况 → mode_transition = "none"
+
+### 4. 命题上下文
+如果 proposition_needed = true 且用户没有完整命题需求：
+- 提取对话历史中最近的命题参数作为 proposition_context
+- 格式：JSON 字符串，包含 topic、question_type、difficulty、count
+
+## 关键词参考
+- **命题关键词**：出题、命题、生成试题、考题、练习题、测试题、出一道、帮我出、再来、继续
+- **阅卷关键词**：阅卷、评分、批改、打分、判断对错
+- **闲聊关键词**：你好、谢谢、再见、天气、今天、顺便问一下、话说
+- **退出关键词**：好了、可以了、就这些、完成、结束
 
 ## 输出格式
 请以 JSON 格式输出你的判断：
 ```json
 {{
-    "intent": "proposition|grading|chat",
+    "primary_intent": "proposition|chat|grading",
+    "proposition_needed": true|false,
+    "proposition_context": "继承的命题参数或空字符串",
+    "mode_transition": "enter|exit|none",
     "reason": "判断理由"
 }}
 ```
 
+## 示例
+
+### 示例1：纯闲聊
+输入："今天天气真不错"
+输出：{{"primary_intent": "chat", "proposition_needed": false, "proposition_context": "", "mode_transition": "none", "reason": "用户在进行普通闲聊"}}
+
+### 示例2：独立命题
+输入："帮我出三道物理选择题"
+输出：{{"primary_intent": "proposition", "proposition_needed": true, "proposition_context": "", "mode_transition": "enter", "reason": "用户明确提出命题需求"}}
+
+### 示例3：命题中闲聊
+输入："顺便问一下今天周几"
+输出：{{"primary_intent": "chat", "proposition_needed": true, "proposition_context": "{{\"topic\": \"物理\", \"count\": 3}}", "mode_transition": "none", "reason": "用户穿插闲聊，但命题流程仍在进行"}}
+
+### 示例4：继续命题
+输入："继续"
+输出：{{"primary_intent": "proposition", "proposition_needed": true, "proposition_context": "{{\"topic\": \"物理\", \"count\": 3, \"question_type\": \"choice\"}}", "mode_transition": "none", "reason": "用户要求继续上一次的命题"}}
+
+### 示例5：命题完成
+输入："好了，就这些"
+输出：{{"primary_intent": "chat", "proposition_needed": false, "proposition_context": "", "mode_transition": "exit", "reason": "用户表示命题已完成"}}
+
 ## 注意事项
-- 当意图不明确时，默认判断为 "chat"
 - 只输出 JSON，不要输出其他内容
-"""
+- proposition_context 只在需要时填充
+- 合理利用对话历史判断上下文"""
 
 ROUTER_PROMPT = ChatPromptTemplate.from_messages([
     ("system", ROUTER_SYSTEM_PROMPT),
-    ("human", "{user_input}")
+    ("human",
+     "用户输入: {user_input}\n对话历史: {chat_history}\n当前会话模式: {current_mode}")
 ])
 
 
@@ -64,22 +125,40 @@ MEMORY_COGNITIVE_SYSTEM_PROMPT = """# Role
 {chat_history}
 
 # 命题要素说明
-- **topic (知识点)**：试题涉及的知识点，如"导数"、"牛顿定律"、"古诗词"等
+- **topic (知识点)**：试题涉及的知识点或主题。
+  - 可以是具体的知识点，如"导数"、"牛顿定律"、"古诗词鉴赏"
+  - 也可以是宽泛的主题，如"伊朗与美以战争"、"科技发展"
+  - **重要**：用户提到的任何主题都应该被视为有效的 topic，无需追问
 - **question_type (题型)**：
   - choice: 选择题
   - fill_blank: 填空题
   - essay: 解答题/简答题
+  - 如果用户说"选择题"或"语文题"，应该推断为 choice
 - **difficulty (难度)**：
   - easy: 简单（基础概念考查）
   - medium: 中等（综合应用）
   - hard: 困难（竞赛/压轴级别）
-- **count (数量)**：试题数量
+  - 如果用户说"难度适中"，应该推断为 medium
+- **count (数量)**：试题数量，默认1道
 
-# 分析流程
-1. 首先检查用户当前输入中明确指定的要素
-2. 对于用户未指定的要素，优先使用长期记忆中的偏好进行补全
-3. 如果长期记忆中也没有相关信息，判断为缺失
-4. 根据缺失情况决定是否需要追问
+# 分析原则（必须严格遵守）
+1. **宽松接受原则**：用户的任何输入都应该被视为有效的需求
+2. **智能推断原则**：根据用户描述推断缺失参数，而不是追问
+3. **最小追问原则**：只有当确实缺少关键信息时才追问，且最多问1个问题
+
+# 智能推断规则
+1. 如果用户提到"选择题"、"语文题"、"数学题"等 → 推断为对应题型
+2. 如果用户提到"难度适中"、"不要太难"等 → 推断为 medium
+3. 如果用户提供了一个主题（如"伊朗战争"、"环境保护"）→ 直接作为 topic
+4. 如果数量没说 → 默认 count = 1
+5. 如果题型没说但说了科目 → 根据科目推断默认题型
+
+# 常见科目的默认题型
+- 语文：默认 choice（选择题）
+- 数学：默认 essay（解答题）
+- 英语：默认 choice（选择题）
+- 物理/化学/生物：默认 choice（选择题）
+- 历史/政治/地理：默认 choice（选择题）
 
 # 输出格式
 请以 JSON 格式输出：
@@ -87,26 +166,30 @@ MEMORY_COGNITIVE_SYSTEM_PROMPT = """# Role
 {{
     "is_complete": true/false,
     "extracted_params": {{
-        "topic": "知识点",
+        "topic": "知识点或主题",
         "question_type": "题型",
         "difficulty": "难度",
         "count": 数量,
         "additional_requirements": "其他要求或空字符串"
     }},
-    "missing_info": ["缺失的要素列表"],
-    "follow_up_question": "如果信息不完整，生成追问；如果完整则为空字符串"
+    "missing_info": ["缺失的要素列表"],  // 建议始终为空，因为应该智能推断
+    "follow_up_question": "追问内容或空字符串"
 }}
 ```
 
-# 追问示例
-如果题型缺失："请问您需要选择题、填空题还是解答题？"
-如果数量缺失："请问您需要几道试题？"
-如果知识点缺失："请问您希望考查哪个知识点？"
+# 追问示例（仅在确实无法推断时使用）
+如果用户只说"出题"，没有其他信息："请问您想出什么类型的题目？"
+
+# 错误示例（不应该追问）
+❌ 用户: "命制一道关于伊朗与美以战争的语文选择题，难度适中"
+❌ 系统: "请问您希望考查哪个具体的知识点？"
+✅ 用户: "命制一道关于伊朗与美以战争的语文选择题，难度适中"
+✅ 系统: topic="伊朗与美以战争", question_type="choice", difficulty="medium", count=1, is_complete=true
 
 # 注意事项
-- 如果长期记忆中有明确的偏好，直接使用，无需追问
-- 追问应该简洁友好，一次最多询问 2 个缺失要素
-- 只输出 JSON，不要输出其他内容
+- **永远不要因为 topic 太宽泛而追问**
+- **永远不要因为 topic 是时事/新闻主题而追问**
+- **只输出 JSON，不要输出其他内容**
 """
 
 MEMORY_COGNITIVE_PROMPT = ChatPromptTemplate.from_messages([

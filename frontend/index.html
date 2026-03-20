@@ -92,6 +92,21 @@
       <!-- 顶部标题栏 -->
       <div id="chat-header">
         <div id="chat-title">IntelliExam Agent</div>
+
+        <!-- 模式切换区域 -->
+        <div id="mode-switcher">
+          <span class="mode-label">当前: <strong id="current-mode">基础模式</strong></span>
+          <button id="btn-mode-chat" class="mode-btn active" title="基础对话模式">
+            <span class="mode-icon">💬</span> 基础
+          </button>
+          <button id="btn-mode-proposition" class="mode-btn" title="命题专业模式">
+            <span class="mode-icon">📝</span> 命题
+          </button>
+          <button id="btn-mode-grading" class="mode-btn" title="审卷模式">
+            <span class="mode-icon">🔍</span> 审卷
+          </button>
+        </div>
+
         <div id="connection-status" class="status-dot disconnected" title="连接状态"></div>
       </div>
 
@@ -99,9 +114,10 @@
       <div id="message-list">
         <!-- 欢迎页（初始展示，发送消息后隐藏） -->
         <div id="welcome-screen">
-          <div class="welcome-badge">✨ AI Native 智能命题系统</div>
+          <div class="welcome-bg-glow"></div>
+          <div class="welcome-badge">✨ AI Native Intelligent Exam Agent</div>
           <h1 class="welcome-title">IntelliExam Agent</h1>
-          <p class="welcome-subtitle">支持多智能体协作的专业命题助手，帮助您高效生成、组卷、审核各类试题</p>
+          <p class="welcome-subtitle">支持多智能体协作与 GraphRAG 的专业命题引擎，帮助您高效生成、组卷、质检各类试题</p>
 
           <div class="example-cards">
             <div class="example-card" data-prompt="帮我出5道高中数学导数的选择题，难度中等，要求考察函数的单调性与极值">
@@ -174,46 +190,16 @@
             </svg>
           </button>
         </div>
+
+        <!-- 投机执行光效与提示 -->
+        <div id="speculative-indicator" class="speculative-indicator hidden">
+          <div class="speculative-glow"></div>
+          <span class="speculative-text">⚡ 正在后台投机执行预判...</span>
+        </div>
+
         <div class="input-hint">IntelliExam Agent 可能出现错误，请核实重要信息</div>
       </div>
     </main>
-
-    <!-- ============ 右侧 Agent 状态面板 ============ -->
-    <aside id="agent-panel" class="hidden">
-      <div class="panel-header">
-        <div class="panel-title">
-          <div id="panel-status-dot" class="panel-dot running"></div>
-          <span id="panel-title-text">Agent 运行中...</span>
-        </div>
-        <button id="panel-close" class="panel-close-btn" title="关闭面板">×</button>
-      </div>
-
-      <!-- 步骤进度 -->
-      <div class="panel-section">
-        <div class="panel-section-title">执行步骤</div>
-        <div id="step-list" class="step-list"></div>
-      </div>
-
-      <!-- 任务参数 -->
-      <div id="params-section" class="panel-section hidden">
-        <div class="panel-section-title">任务参数</div>
-        <div id="params-content" class="params-grid"></div>
-      </div>
-
-      <!-- 结果展示 -->
-      <div id="result-section" class="panel-section hidden">
-        <div class="panel-section-title">生成结果</div>
-        <div id="result-summary" class="result-summary"></div>
-        <button id="download-btn" class="download-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-          下载 Markdown 文件
-        </button>
-      </div>
-    </aside>
 
   </div><!-- #app -->
 
@@ -221,6 +207,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.8/purify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
 
   <!-- 自定义 JS 模块 -->
   <script src="/js/panel.js"></script>
@@ -228,6 +215,7 @@
   <script src="/js/chat.js"></script>
   <script src="/js/skills_panel.js"></script>
   <script src="/js/voice_input.js"></script>
+  <script src="/js/mode_switch.js"></script>
   <script src="/js/app.js"></script>
 
 </body>

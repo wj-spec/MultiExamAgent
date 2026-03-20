@@ -38,9 +38,10 @@ class ClassifyIntentTool(BaseTool):
             ToolParameter(
                 name="intent",
                 type="string",
-                description="意图类型：proposition(命题)、grading(阅卷)、chat(闲聊)",
+                description="意图类型：proposition(命题)、grading(阅卷)、paper_generation(组卷)、review(审题)、chat(闲聊)",
                 required=True,
-                enum=["proposition", "grading", "chat"]
+                enum=["proposition", "grading",
+                      "paper_generation", "review", "chat"]
             ),
             ToolParameter(
                 name="confidence",
@@ -153,12 +154,20 @@ ROUTER_SYSTEM_PROMPT = """你是一个智能路由 Agent，负责分析用户输
 ## 意图类型说明
 - proposition: 用户想要生成试题、出题、命题
 - grading: 用户想要阅卷、评分、批改
+- paper_generation: 用户想要组卷、生成试卷
+- review: 用户想要审题、审核
 - chat: 普通对话、问答、咨询
+
+## 模式切换说明
+当检测到以下意图时，需要触发模式切换：
+- proposition/paper_generation: 切换到专业命题模式
+- grading/review: 切换到审卷模式
+- chat: 保持基础对话模式
 
 ## 工作流程
 1. 首先使用 classify_intent 工具判断用户意图
-2. 如果意图是 proposition，使用 extract_entities 工具提取实体信息
-3. 返回结构化的路由结果
+2. 如果意图是 proposition/grading/paper_generation/review，使用 extract_entities 工具提取实体信息
+3. 返回结构化的路由结果，包含模式切换信号
 
 ## 示例
 用户输入: "帮我出5道代数选择题"
@@ -170,6 +179,10 @@ ROUTER_SYSTEM_PROMPT = """你是一个智能路由 Agent，负责分析用户输
 
 用户输入: "你好"
 1. 调用 classify_intent(intent="chat", confidence=0.99, reason="普通问候")
+
+用户输入: "帮我组一套数学试卷"
+1. 调用 classify_intent(intent="paper_generation", confidence=0.95, reason="用户要求组卷")
+2. 调用 extract_entities(topic="数学")
 """
 
 
@@ -196,15 +209,16 @@ class RouterAgentV2(ToolCallingAgent):
     def system_prompt(self) -> str:
         return ROUTER_SYSTEM_PROMPT
 
-    def route(self, user_input: str) -> Dict[str, Any]:
+    def route(self, user_input: str, current_mode: str = "chat") -> Dict[str, Any]:
         """
         执行路由判断
 
         Args:
             user_input: 用户输入
+            current_mode: 当前模式 (chat/proposition/grading)
 
         Returns:
-            路由结果
+            路由结果，包含模式切换信号
         """
         # 运行 Agent
         trace = self.run_with_tools(user_input)
@@ -215,6 +229,8 @@ class RouterAgentV2(ToolCallingAgent):
             "reason": "",
             "confidence": 0.0,
             "entities": {},
+            "mode_switch": None,  # 模式切换信号
+            "mode_transition": "none",  # enter/exit/none
             "trace": trace.to_dict()
         }
 
@@ -233,7 +249,45 @@ class RouterAgentV2(ToolCallingAgent):
         if not trace.decisions and trace.final_result:
             result = self._fallback_parse(trace.final_result, user_input)
 
+        # 计算模式切换
+        result["mode_switch"], result["mode_transition"] = self._calculate_mode_switch(
+            result["intent"], current_mode
+        )
+
         return result
+
+    def _calculate_mode_switch(self, intent: str, current_mode: str) -> tuple:
+        """
+        计算模式切换
+
+        Args:
+            intent: 检测到的意图
+            current_mode: 当前模式
+
+        Returns:
+            (目标模式, 切换类型)
+        """
+        # 定义意图到模式的映射
+        intent_to_mode = {
+            "proposition": "proposition",
+            "paper_generation": "proposition",
+            "grading": "grading",
+            "review": "grading",
+            "chat": "chat"
+        }
+
+        target_mode = intent_to_mode.get(intent, "chat")
+
+        # 判断是否需要切换
+        if target_mode != current_mode:
+            if target_mode == "chat":
+                return target_mode, "exit"
+            elif current_mode == "chat":
+                return target_mode, "enter"
+            else:
+                return target_mode, "switch"
+
+        return None, "none"
 
     def _fallback_parse(self, response: str, user_input: str) -> Dict[str, Any]:
         """
@@ -255,6 +309,14 @@ class RouterAgentV2(ToolCallingAgent):
         if any(kw in user_lower for kw in ["出题", "命题", "生成试题", "考题", "出一套"]):
             result["intent"] = "proposition"
             result["reason"] = "关键词匹配：命题相关"
+            result["confidence"] = 0.8
+        elif any(kw in user_lower for kw in ["组卷", "生成试卷", "出一套卷"]):
+            result["intent"] = "paper_generation"
+            result["reason"] = "关键词匹配：组卷相关"
+            result["confidence"] = 0.8
+        elif any(kw in user_lower for kw in ["审题", "审核", "检查题目"]):
+            result["intent"] = "review"
+            result["reason"] = "关键词匹配：审题相关"
             result["confidence"] = 0.8
         elif any(kw in user_lower for kw in ["阅卷", "评分", "批改", "打分"]):
             result["intent"] = "grading"
@@ -294,19 +356,39 @@ def router_node_v2(state: AgentState) -> AgentState:
     路由节点函数 V2
 
     使用 Tool Calling 版本的 Router Agent。
-    与旧版本保持兼容的接口。
+    支持模式切换信号。
     """
     # 添加状态消息
     new_state = add_status_message(state, "🧠 正在分析用户意图...")
 
+    # 获取当前模式
+    current_mode = state.get("current_mode", "chat")
+
     # 创建路由 Agent 并执行
     agent = RouterAgentV2()
-    result = agent.route(state["user_input"])
+    result = agent.route(state["user_input"], current_mode)
 
     # 更新状态
     new_state = dict(new_state)
     new_state["intent"] = result["intent"]
     new_state["routing_reason"] = result["reason"]
+    new_state["primary_intent"] = result["intent"]
+
+    # 更新模式切换状态
+    if result.get("mode_switch"):
+        new_state["mode_transition"] = result["mode_transition"]
+        new_state["current_mode"] = result["mode_switch"]
+
+    # 判断是否需要命题相关处理
+    proposition_intents = ["proposition", "paper_generation"]
+    grading_intents = ["grading", "review"]
+
+    if result["intent"] in proposition_intents:
+        new_state["proposition_needed"] = True
+    elif result["intent"] in grading_intents:
+        new_state["proposition_needed"] = False
+    else:
+        new_state["proposition_needed"] = False
 
     # 如果有提取的实体，合并到状态
     if result.get("entities"):
@@ -316,14 +398,20 @@ def router_node_v2(state: AgentState) -> AgentState:
 
     # 根据意图设置下一个节点
     intent = result["intent"]
-    if intent == "proposition":
+    if intent in proposition_intents:
         new_state["next_node"] = "memory_recall"
         new_state = add_status_message(
             new_state, f"📋 意图识别：命题需求 (置信度: {result['confidence']:.0%})")
-    elif intent == "grading":
+        if result.get("mode_switch"):
+            new_state = add_status_message(
+                new_state, f"🔄 建议切换到专业模式")
+    elif intent in grading_intents:
         new_state["next_node"] = "grading"
         new_state = add_status_message(
-            new_state, f"📋 意图识别：阅卷需求 (置信度: {result['confidence']:.0%})")
+            new_state, f"📋 意图识别：审卷需求 (置信度: {result['confidence']:.0%})")
+        if result.get("mode_switch"):
+            new_state = add_status_message(
+                new_state, f"🔄 建议切换到审卷模式")
     else:
         new_state["next_node"] = "chat_reply"
         new_state = add_status_message(

@@ -11,12 +11,43 @@ from typing import List, Optional, Dict, Any
 import uuid
 
 
+class ConversationState:
+    """
+    会话状态类
+
+    用于管理单个会话的状态信息，
+    包括当前模式和命题上下文。
+    """
+
+    def __init__(self):
+        self.current_mode: str = "chat"  # proposition / chat / mixed
+        self.last_proposition_params: dict = {}
+        self.proposition_in_progress: bool = False
+
+    def to_dict(self) -> dict:
+        return {
+            "current_mode": self.current_mode,
+            "last_proposition_params": self.last_proposition_params,
+            "proposition_in_progress": self.proposition_in_progress
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ConversationState":
+        state = cls()
+        state.current_mode = data.get("current_mode", "chat")
+        state.last_proposition_params = data.get("last_proposition_params", {})
+        state.proposition_in_progress = data.get(
+            "proposition_in_progress", False)
+        return state
+
+
 class ConversationManager:
     """
     对话历史管理器
 
     负责管理存储在本地的 JSON 格式对话历史数据，
     支持创建、加载、删除会话等功能。
+    支持会话状态管理（当前模式和命题上下文）。
     """
 
     def __init__(self, conversations_dir: str = None):
@@ -375,6 +406,110 @@ class ConversationManager:
             "total_messages": total_messages,
             "conversations_dir": self.conversations_dir
         }
+
+    # ==================== 会话状态管理 ====================
+
+    def get_conversation_state(self, conversation_id: str) -> Optional[ConversationState]:
+        """
+        获取会话状态
+
+        Args:
+            conversation_id: 会话ID
+
+        Returns:
+            ConversationState 对象或 None
+        """
+        conversation = self.load_conversation(conversation_id)
+        if not conversation:
+            return None
+
+        state_data = conversation.get("conversation_state", {})
+        return ConversationState.from_dict(state_data)
+
+    def update_conversation_state(
+        self,
+        conversation_id: str,
+        state: ConversationState
+    ) -> bool:
+        """
+        更新会话状态
+
+        Args:
+            conversation_id: 会话ID
+            state: ConversationState 对象
+
+        Returns:
+            是否成功更新
+        """
+        conversation = self.load_conversation(conversation_id)
+        if not conversation:
+            return False
+
+        conversation["conversation_state"] = state.to_dict()
+        return self.save_conversation(conversation)
+
+    def update_mode(
+        self,
+        conversation_id: str,
+        mode: str
+    ) -> bool:
+        """
+        更新会话模式
+
+        Args:
+            conversation_id: 会话ID
+            mode: 新模式 (proposition/chat)
+
+        Returns:
+            是否成功更新
+        """
+        state = self.get_conversation_state(conversation_id)
+        if not state:
+            state = ConversationState()
+
+        state.current_mode = mode
+        return self.update_conversation_state(conversation_id, state)
+
+    def update_proposition_params(
+        self,
+        conversation_id: str,
+        params: dict
+    ) -> bool:
+        """
+        更新命题参数
+
+        Args:
+            conversation_id: 会话ID
+            params: 命题参数字典
+
+        Returns:
+            是否成功更新
+        """
+        state = self.get_conversation_state(conversation_id)
+        if not state:
+            state = ConversationState()
+
+        state.last_proposition_params = params
+        state.proposition_in_progress = True
+        return self.update_conversation_state(conversation_id, state)
+
+    def clear_proposition_state(self, conversation_id: str) -> bool:
+        """
+        清除命题状态
+
+        Args:
+            conversation_id: 会话ID
+
+        Returns:
+            是否成功清除
+        """
+        state = self.get_conversation_state(conversation_id)
+        if not state:
+            return False
+
+        state.proposition_in_progress = False
+        state.current_mode = "chat"
+        return self.update_conversation_state(conversation_id, state)
 
 
 # 全局单例

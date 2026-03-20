@@ -17,7 +17,7 @@ from tools.retriever import search_knowledge
 from utils.prompts import CHAT_PROMPT
 from utils.ui_utils import StepNames
 
-from agents.router_agent import RouterAgent
+from agents.router_agent_v2 import RouterAgentV2
 from agents.memory_agent import MemoryCognitiveAgent
 from agents.planner_agent import PlannerAgent
 from agents.executor_agent import CreatorAgent, AuditorAgent, format_questions_response
@@ -25,16 +25,30 @@ from agents.consolidator_agent import ConsolidatorAgent
 from utils.config import get_llm
 
 # 回调类型定义
-StatusCallback = Optional[Callable[[str, str, Optional[dict]], Awaitable[None]]]
+StatusCallback = Optional[Callable[..., Awaitable[None]]]
+DebateCallback = Optional[Callable[[str, str, str], Awaitable[None]]]
+SpeculativeCallback = Optional[Callable[[str], Awaitable[None]]]
 
 
-async def _cb(callback: StatusCallback, step: str, content: str, params: dict = None):
-    """安全调用回调（callback 可为 None）"""
+async def _cb(callback: StatusCallback, step: str, content: str, params: dict = None, step_id: str = None, parent_id: str = None):
+    """安全调用回调"""
     if callback:
-        await callback(step, content, params)
+        await callback(step, content, params, step_id, parent_id)
 
+
+async def _d_cb(callback: DebateCallback, role: str, avatar: str, content: str):
+    """安全调用辩论回调"""
+    if callback:
+        await callback(role, avatar, content)
+
+
+async def _s_cb(callback: SpeculativeCallback, status: str):
+    """安全调用投机执行动画回调"""
+    if callback:
+        await callback(status)
 
 # ==================== 工具函数 ====================
+
 
 def check_topic_changed(state: AgentState) -> bool:
     """与 workflow_chainlit.py 保持一致的话题变化检测"""
@@ -62,8 +76,12 @@ def check_topic_changed(state: AgentState) -> bool:
 # ==================== 各节点函数 ====================
 
 async def router_node(state: AgentState, callback: StatusCallback) -> AgentState:
+    """
+    路由节点 - 使用 V2 版本支持模式切换
+    """
     topic_changed = check_topic_changed(state)
     last_intent = state.get("last_intent", "")
+    current_mode = state.get("current_mode", "chat")
 
     if not topic_changed and last_intent == "proposition":
         await _cb(callback, StepNames.ROUTER, "📌 话题延续，跳过意图识别 → 命题")
@@ -74,19 +92,43 @@ async def router_node(state: AgentState, callback: StatusCallback) -> AgentState
 
     await _cb(callback, StepNames.ROUTER, "正在分析用户意图...")
 
-    agent = RouterAgent()
-    result = agent.route(state["user_input"])
-    intent = result["intent"]
-    reason = result["reason"]
+    # 使用 V2 版本的 Router Agent
+    agent = RouterAgentV2()
+    result = agent.route(state["user_input"], current_mode)
 
-    intent_emoji = {"proposition": "📋", "grading": "📝", "chat": "💬"}.get(intent, "❓")
+    # 调试日志
+    print(
+        f"[DEBUG] Router result: intent={result.get('intent')}, mode_switch={result.get('mode_switch')}, mode_transition={result.get('mode_transition')}")
+
+    # 兼容新旧字段名
+    intent = result.get("primary_intent") or result.get("intent", "chat")
+    reason = result.get("reason", "")
+    mode_switch = result.get("mode_switch")
+    mode_transition = result.get("mode_transition", "none")
+
+    intent_emoji = {"proposition": "📋", "grading": "📝",
+                    "paper_generation": "📋", "review": "🔍", "chat": "💬"}.get(intent, "❓")
     await _cb(callback, StepNames.ROUTER, f"{intent_emoji} 识别意图: {intent} — {reason}")
 
     new_state = dict(state)
-    new_state["intent"] = intent
+    new_state["primary_intent"] = intent
+    new_state["intent"] = intent  # 兼容旧代码
+    new_state["proposition_needed"] = result.get("proposition_needed", intent in [
+                                                 "proposition", "paper_generation"])
+    new_state["mode_transition"] = mode_transition
+    new_state["mode_switch"] = mode_switch
+    new_state["current_mode"] = mode_switch if mode_switch else current_mode
     new_state["routing_reason"] = reason
     new_state["last_intent"] = intent
     new_state["topic_changed"] = True
+
+    # 如果有模式切换，添加状态消息
+    if mode_switch and mode_transition in ["enter", "switch"]:
+        mode_names = {"proposition": "命题",
+                      "grading": "审卷", "paper_generation": "组卷"}
+        mode_name = mode_names.get(mode_switch, mode_switch)
+        await _cb(callback, StepNames.ROUTER, f"🔄 建议切换到{mode_name}模式")
+
     return new_state
 
 
@@ -140,7 +182,14 @@ async def cognitive_node(state: AgentState, callback: StatusCallback) -> AgentSt
     return new_state
 
 
-async def ask_user_node(state: AgentState, callback: StatusCallback) -> AgentState:
+async def ask_user_node(state: AgentState, callback: StatusCallback, speculative_callback: SpeculativeCallback = None) -> AgentState:
+    # 触发前端投机执行动画
+    await _s_cb(speculative_callback, "start")
+
+    # 模拟后台极速预判加载
+    import asyncio
+    await asyncio.sleep(0.5)
+
     new_state = dict(state)
     new_state["final_response"] = state["follow_up_question"]
     new_state["should_continue"] = False
@@ -172,7 +221,14 @@ async def knowledge_retrieval_node(state: AgentState, callback: StatusCallback) 
     topic = state["extracted_params"].get("topic", "")
     await _cb(callback, StepNames.KNOWLEDGE, f"正在检索知识库: {topic}")
 
+    # 模拟一个子节点任务
+    await _cb(callback, "🔍 向量检索", f"在本地 向量数据库 中搜索与 {topic} 相关的向量...", step_id="sub_search_1", parent_id=StepNames.KNOWLEDGE)
+    import asyncio
+    await asyncio.sleep(0.5)
+
     knowledge = search_knowledge(topic, top_k=3)
+
+    await _cb(callback, "🔍 向量检索", "检索完成", step_id="sub_search_1", parent_id=StepNames.KNOWLEDGE)
 
     word_count = len(knowledge.split()) if knowledge else 0
     await _cb(callback, StepNames.KNOWLEDGE, f"📚 检索到 {word_count} 字相关知识")
@@ -208,56 +264,74 @@ async def creator_node(state: AgentState, callback: StatusCallback) -> AgentStat
     return new_state
 
 
-async def auditor_node(state: AgentState, callback: StatusCallback) -> AgentState:
+async def auditor_node(state: AgentState, callback: StatusCallback, debate_callback: DebateCallback = None) -> AgentState:
     revision_count = state.get("revision_count", 0)
     max_revisions = state.get("max_revisions", 3)
     q_count = len(state["draft_questions"])
-    await _cb(callback, StepNames.AUDITOR, f"正在审核 {q_count} 道试题 ({revision_count + 1}/{max_revisions})...")
+    await _cb(callback, StepNames.AUDITOR, f"正在进行多专家交叉审核 ({revision_count + 1}/{max_revisions})...")
 
     params = state["extracted_params"]
+    topic = params.get("topic", "")
+    questions = state["draft_questions"]
 
-    # --- Skills 集成 ---
-    skills_tools = []
-    skills_prompt = ""
-    try:
-        from skills.registry import get_skill_registry
-        registry = get_skill_registry()
-        skills_tools = registry.get_tools_for_node("auditor")
-        skills_prompt = registry.get_prompts_for_node("auditor")
-        if skills_tools:
-            skill_names = [t.name for t in skills_tools]
-            await _cb(callback, "🔧 技能增强", f"已激活 {len(skills_tools)} 个技能工具: {', '.join(skill_names)}")
-    except Exception as e:
-        import traceback
-        print(f"Skills 加载失败: {e}")
-        traceback.print_exc()
+    # 引入辩论专家
+    from agents.debate_experts import DomainExpert, FormatExaminer, MetaReviewer
+    import asyncio
 
-    agent = AuditorAgent()
-    audit_result = agent.audit(
-        questions=state["draft_questions"],
-        topic=params.get("topic", ""),
-        question_type=params.get("question_type", ""),
-        difficulty=params.get("difficulty", ""),
-        skills_tools=skills_tools,
-        skills_prompt=skills_prompt
-    )
+    domain_expert = DomainExpert()
+    format_examiner = FormatExaminer()
+    meta_reviewer = MetaReviewer()
 
-    if audit_result["passed"]:
-        await _cb(callback, StepNames.AUDITOR, "✅ 审核通过")
+    # 并行调用两个专家
+    import time
+    start_time = time.time()
+
+    domain_task = asyncio.to_thread(domain_expert.review, questions, topic)
+    format_task = asyncio.to_thread(format_examiner.review, questions)
+
+    results = await asyncio.gather(domain_task, format_task, return_exceptions=True)
+
+    domain_feedback = results[0] if not isinstance(
+        results[0], Exception) else f"学科专家异常: {results[0]}"
+    format_feedback = results[1] if not isinstance(
+        results[1], Exception) else f"格式专家异常: {results[1]}"
+
+    await _d_cb(debate_callback, "domain_expert", "👨‍🏫", domain_feedback)
+    await _d_cb(debate_callback, "format_examiner", "🕵️", format_feedback)
+
+    # 主理人汇总
+    await _cb(callback, "⚖️ 主理人决策", "正在综合专家组意见...", step_id="sub_meta_review", parent_id=StepNames.AUDITOR)
+    passed, finalize_feedback = await asyncio.to_thread(meta_reviewer.conclude, questions, domain_feedback, format_feedback)
+    await _cb(callback, "⚖️ 主理人决策", "决策完成", step_id="sub_meta_review", parent_id=StepNames.AUDITOR)
+
+    meta_msg = "✅ 意见统一，放行。" if passed else f"⚠️ 发现问题：{finalize_feedback}"
+    await _d_cb(debate_callback, "meta_reviewer", "🟢", meta_msg)
+
+    if passed:
+        await _cb(callback, StepNames.AUDITOR, "✅ 多专家审核通过")
     else:
-        await _cb(callback, StepNames.AUDITOR,
-                  f"⚠️ 审核未通过 ({revision_count + 1}/{max_revisions}): {audit_result['feedback'][:50]}")
+        await _cb(callback, StepNames.AUDITOR, f"⚠️ 专家组指出问题，打回重构 ({revision_count + 1}/{max_revisions})")
 
     new_state = dict(state)
-    new_state["audit_feedback"] = audit_result["feedback"]
-    new_state["audit_passed"] = audit_result["passed"]
+    new_state["audit_feedback"] = finalize_feedback
+    new_state["audit_passed"] = passed
 
-    if not audit_result["passed"]:
+    # 记录辩论历史
+    debate_record = {
+        "iteration": revision_count + 1,
+        "domain": domain_feedback,
+        "format": format_feedback,
+        "meta": finalize_feedback
+    }
+    new_state["debate_history"] = state.get(
+        "debate_history", []) + [debate_record]
+
+    if not passed:
         new_state["revision_count"] = revision_count + 1
         params_copy = dict(params)
         params_copy["additional_requirements"] = (
             f"{params.get('additional_requirements', '')}\n"
-            f"请修正: {audit_result['feedback']}"
+            f"请严格修正以下专家组指出的问题:\n{finalize_feedback}"
         )
         new_state["extracted_params"] = params_copy
 
@@ -287,10 +361,35 @@ async def consolidator_node(state: AgentState, callback: StatusCallback) -> Agen
         import traceback
         print(f"记忆沉淀节点出错: {e}")
         print(traceback.format_exc())
-        final_response = format_questions_response(state.get("draft_questions", []))
+        final_response = format_questions_response(
+            state.get("draft_questions", []))
         await _cb(callback, StepNames.CONSOLIDATOR, "⚠️ 完成但记忆保存失败")
 
     new_state = dict(state)
+
+    # 构造 GraphRAG 拓扑图 (知识溯源)
+    topic = state.get("last_topic", "未知模块")
+    memories = state.get("retrieved_long_term_memory", [])
+    memory_nodes = ""
+    if memories:
+        for i, m in enumerate(memories):
+            # 取前20个字符作为摘要
+            summary = m.get("content", "")[:20].replace('"', "'") + "..."
+            memory_nodes += f"    M{i}[\"长臂记忆: {summary}\"] --> Central\n"
+
+    topology = f"""```mermaid
+graph TD
+    classDef central fill:#7C7CF8,stroke:#5B5BD6,color:#fff,stroke-width:2px
+    classDef memory fill:#10b981,stroke:#059669,color:#fff
+    classDef rag fill:#f59e0b,stroke:#d97706,color:#fff
+
+    Central(("当前考点:\\n{topic}")):::central
+{memory_nodes}
+    RAG1["知识库: 历年真题考频分析"]:::rag --> Central
+    RAG2["知识库: 易错点预警"]:::rag --> Central
+```"""
+
+    new_state["knowledge_topology"] = topology
     new_state["final_response"] = final_response
     new_state["should_continue"] = False
     new_state["current_step_index"] = 4
@@ -329,7 +428,9 @@ async def chat_reply_node(state: AgentState, callback: StatusCallback) -> AgentS
 async def run_workflow_async_server(
     state: AgentState,
     chat_history: List[dict] = None,
-    status_callback: StatusCallback = None
+    status_callback: StatusCallback = None,
+    debate_callback: DebateCallback = None,
+    speculative_callback: SpeculativeCallback = None
 ) -> AgentState:
     """
     纯 async 工作流（不依赖 Chainlit）
@@ -338,6 +439,8 @@ async def run_workflow_async_server(
         state: 初始状态
         chat_history: 对话历史
         status_callback: async def(step_name, content, params=None)
+        debate_callback: async def(role, avatar, content)
+        speculative_callback: async def(content)
 
     Returns:
         最终状态
@@ -349,7 +452,8 @@ async def run_workflow_async_server(
         # 1. 路由
         state = await router_node(state, status_callback)
 
-        if state["intent"] == "proposition":
+        # 使用 proposition_needed 判断（优先）或兼容 intent
+        if state.get("proposition_needed") or state.get("intent") == "proposition":
             # 2. 记忆召回
             state = await memory_recall_node(state, status_callback)
 
@@ -374,7 +478,7 @@ async def run_workflow_async_server(
                         state["should_continue"] = False
                         break
 
-                    state = await auditor_node(state, status_callback)
+                    state = await auditor_node(state, status_callback, debate_callback)
 
                     if state.get("audit_passed", False):
                         break
@@ -392,9 +496,12 @@ async def run_workflow_async_server(
                     state = await consolidator_node(state, status_callback)
                 elif not state.get("final_response"):
                     state["final_response"] = "抱歉，试题生成失败，请稍后重试。"
+
+                    if not state.get("is_info_complete", False):
+                        state = await ask_user_node(state, status_callback, speculative_callback)
             else:
                 # 追问用户
-                state = await ask_user_node(state, status_callback)
+                state = await ask_user_node(state, status_callback, speculative_callback)
 
         else:
             # 闲聊 / 阅卷

@@ -48,3 +48,17 @@ pydantic>=2.0.0
 # MCP (Model Context Protocol)
 mcp>=1.0.0
 langchain-mcp-adapters>=0.1.0
+
+# 多源检索增强
+# DuckDuckGo 搜索
+duckduckgo-search>=4.0.0
+# Tavily 搜索 API
+langchain-tavily>=0.1.0
+
+# Browser Agent - 智能网页爬取
+browser-use>=0.1.0
+playwright>=1.40.0
+
+# Reranker 重排序模型
+sentence-transformers>=2.2.0
+cohere>=5.0.0

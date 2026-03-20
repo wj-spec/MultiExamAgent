@@ -8,16 +8,17 @@ from typing import Literal, TypedDict
 from langgraph.graph import StateGraph, END
 
 from graphs.state import AgentState, create_initial_state
-from agents.router_agent import router_node
+from agents.router_agent_v2 import router_node_v2
 from agents.memory_agent import memory_recall_node, cognitive_node, ask_user_node
 from agents.planner_agent import planner_node
 from agents.executor_agent import knowledge_retrieval_node, creator_node, auditor_node
 from agents.consolidator_agent import consolidator_node, chat_reply_node
+from agents.chat_agent import chat_node
 
 
 def route_by_intent(state: AgentState) -> Literal["memory_recall", "chat_reply"]:
     """
-    根据意图路由
+    根据双层意图路由
 
     Args:
         state: 当前状态
@@ -25,12 +26,11 @@ def route_by_intent(state: AgentState) -> Literal["memory_recall", "chat_reply"]
     Returns:
         下一个节点名称
     """
-    intent = state.get("intent", "chat")
-    if intent == "proposition":
+    # 使用新的 proposition_needed 字段
+    proposition_needed = state.get("proposition_needed", False)
+
+    if proposition_needed:
         return "memory_recall"
-    elif intent == "grading":
-        # TODO: 实现阅卷功能
-        return "chat_reply"
     else:
         return "chat_reply"
 
@@ -79,6 +79,10 @@ def build_workflow() -> StateGraph:
     """
     构建工作流图
 
+    支持两种模式：
+    1. 基础对话模式：chat_reply 节点
+    2. 专业领域模式：memory_recall -> cognitive -> planner -> ...
+
     Returns:
         编译后的工作流图
     """
@@ -86,8 +90,8 @@ def build_workflow() -> StateGraph:
     workflow = StateGraph(AgentState)
 
     # 添加节点
-    # 第一层：入口路由
-    workflow.add_node("router", router_node)
+    # 第一层：入口路由（使用 V2 版本，支持模式切换）
+    workflow.add_node("router", router_node_v2)
 
     # 第二层：业务控制层
     workflow.add_node("memory_recall", memory_recall_node)
@@ -101,8 +105,8 @@ def build_workflow() -> StateGraph:
     workflow.add_node("auditor", auditor_node)
     workflow.add_node("consolidator", consolidator_node)
 
-    # 闲聊节点
-    workflow.add_node("chat_reply", chat_reply_node)
+    # 基础对话节点（使用新的 chat_node）
+    workflow.add_node("chat_reply", chat_node)
 
     # 设置入口点
     workflow.set_entry_point("router")
@@ -256,10 +260,10 @@ def visualize_workflow():
     mermaid = """
 ```mermaid
 graph TD
-    User[用户输入] --> Router[路由节点]
-    Router -->|命题意图| MemoryRecall[记忆召回]
-    Router -->|闲聊| ChatReply[闲聊回复]
-    Router -->|阅卷| ChatReply
+    User[用户输入] --> Router[路由节点 V2]
+    Router -->|命题/组卷意图| MemoryRecall[记忆召回]
+    Router -->|闲聊/通用问答| ChatReply[基础对话]
+    Router -->|审卷/审题| ChatReply
 
     MemoryRecall --> Cognitive[认知分析]
     Cognitive -->|需求完整| Planner[规划]
@@ -276,6 +280,20 @@ graph TD
 
     Consolidator --> End2[完成]
     ChatReply --> End3[完成]
+
+    subgraph 基础模式
+        ChatReply
+    end
+
+    subgraph 专业模式
+        MemoryRecall
+        Cognitive
+        Planner
+        KnowledgeRetrieval
+        Creator
+        Auditor
+        Consolidator
+    end
 ```
     """
     return mermaid
