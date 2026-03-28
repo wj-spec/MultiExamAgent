@@ -190,7 +190,8 @@ def chat_reply_node(state: AgentState) -> AgentState:
     # 构建对话历史
     chat_history = []
     for msg in state["chat_history"][-5:]:  # 最近 5 轮
-        chat_history.append((msg["role"], msg["content"]))
+        role = "human" if msg["role"] in ("user", "human") else "ai"
+        chat_history.append((role, msg["content"]))
 
     chain = CHAT_PROMPT | llm
 
@@ -201,6 +202,9 @@ def chat_reply_node(state: AgentState) -> AgentState:
         })
         final_response = response.content
     except Exception as e:
+        import traceback
+        print(f"[ERROR] chat_reply_node in consolidator 异常: {e}")
+        traceback.print_exc()
         final_response = "您好！我是 IntelliExam 命题助手，可以帮助您生成各类试题。请告诉我您需要什么类型的题目？"
 
     # 更新状态

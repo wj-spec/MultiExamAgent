@@ -39,12 +39,12 @@ const Panel = (() => {
 
     const debateBubblesEl = getActiveEl('.debate-bubbles');
     if (debateBubblesEl) debateBubblesEl.innerHTML = '';
-    
+
     currentTopic = '试题';
   }
 
   function _getStepId(stepName, stepId) {
-     return stepId || stepName;
+    return stepId || stepName;
   }
 
   /**
@@ -52,21 +52,19 @@ const Panel = (() => {
    */
   function updateStep(stepName, status, detail, elapsed, stepId = null, parentId = null) {
     const sId = _getStepId(stepName, stepId);
-    
+
     const stepListEl = getActiveEl('.step-list');
     if (!stepListEl) return; // 没有容器则跳过
 
     if (!steps[sId]) {
       const row = document.createElement('div');
       row.className = parentId ? 'step-item child-step' : 'step-item';
-      // 样式调整以匹配紧凑气泡
-      row.style.padding = '4px 0';
       row.innerHTML = `
-        <div class="step-icon pending" style="width:16px; height:16px; font-size:9px;">○</div>
-        <div class="step-body" style="font-size:11px;">
-          <div class="step-name" style="font-size:11px; font-weight:600;">${escapeHtml(stepName)}</div>
-          <div class="step-detail" style="font-size:10px;">等待中...</div>
-          <div class="step-children-container hidden" style="margin-top:4px;"></div>
+        <div class="step-icon pending">○</div>
+        <div class="step-body">
+          <div class="step-name">${escapeHtml(stepName)}</div>
+          <div class="step-detail">等待中...</div>
+          <div class="step-children-container hidden"></div>
         </div>
       `;
 
@@ -90,7 +88,7 @@ const Panel = (() => {
           s.nameEl.style.opacity = s.childrenContainerEl.classList.contains('hidden') ? '0.8' : '1';
         }
       };
-      
+
       steps[sId].nameEl.style.cursor = 'pointer';
       steps[sId].detailEl.style.cursor = 'pointer';
       steps[sId].nameEl.addEventListener('click', toggleFn);
@@ -111,31 +109,31 @@ const Panel = (() => {
 
     s.iconEl.className = `step-icon ${status}`;
     if (status === 'running') {
-        s.iconEl.innerHTML = '<span class="spinner-border text-brand spinner-border-sm" style="width: 10px; height: 10px; border-width: 1.5px;"></span>';
-        s.iconEl.style.color = 'var(--brand)';
-        s.iconEl.style.borderColor = 'var(--brand)';
-        s.iconEl.style.background = 'rgba(124, 124, 248, 0.15)';
+      s.iconEl.innerHTML = '<span class="spinner-border text-brand spinner-border-sm" style="width: 10px; height: 10px; border-width: 1.5px;"></span>';
+      s.iconEl.style.color = 'var(--brand)';
+      s.iconEl.style.borderColor = 'var(--brand)';
+      s.iconEl.style.background = 'rgba(124, 124, 248, 0.15)';
     }
     else if (status === 'done') {
-        s.iconEl.textContent = '✓';
-        s.iconEl.style.color = 'var(--green)';
-        s.iconEl.style.borderColor = 'var(--green)';
-        s.iconEl.style.background = 'rgba(16, 185, 129, 0.12)';
-        s.iconEl.innerHTML = '✓'; // Reset contents
+      s.iconEl.textContent = '✓';
+      s.iconEl.style.color = 'var(--green)';
+      s.iconEl.style.borderColor = 'var(--green)';
+      s.iconEl.style.background = 'rgba(16, 185, 129, 0.12)';
+      s.iconEl.innerHTML = '✓'; // Reset contents
     }
     else if (status === 'error') {
-        s.iconEl.textContent = '✕';
-        s.iconEl.style.color = 'var(--red)';
-        s.iconEl.style.borderColor = 'var(--red)';
-        s.iconEl.style.background = 'rgba(239, 68, 68, 0.12)';
-        s.iconEl.innerHTML = '✕';
+      s.iconEl.textContent = '✕';
+      s.iconEl.style.color = 'var(--red)';
+      s.iconEl.style.borderColor = 'var(--red)';
+      s.iconEl.style.background = 'rgba(239, 68, 68, 0.12)';
+      s.iconEl.innerHTML = '✕';
     }
     else {
-        s.iconEl.textContent = '○';
-        s.iconEl.style.color = 'var(--text-muted)';
-        s.iconEl.style.borderColor = 'var(--border-medium)';
-        s.iconEl.style.background = 'transparent';
-        s.iconEl.innerHTML = '○';
+      s.iconEl.textContent = '○';
+      s.iconEl.style.color = 'var(--text-muted)';
+      s.iconEl.style.borderColor = 'var(--border-medium)';
+      s.iconEl.style.background = 'transparent';
+      s.iconEl.innerHTML = '○';
     }
 
     if (detail) s.detailEl.textContent = detail;
@@ -144,7 +142,7 @@ const Panel = (() => {
       s.childrenContainerEl.classList.add('hidden');
       s.nameEl.style.opacity = '0.8';
       if (!s.nameEl.textContent.includes('点击展开')) {
-         s.nameEl.innerHTML = `${escapeHtml(s.name)} <span style="font-size:9px;color:var(--text-muted);font-weight:normal">(点击展开)</span>`;
+        s.nameEl.innerHTML = `${escapeHtml(s.name)} <span style="font-size:9px;color:var(--text-muted);font-weight:normal">(点击展开)</span>`;
       }
     }
 
@@ -156,11 +154,11 @@ const Panel = (() => {
       badge.textContent = elapsed;
       s.el.querySelector('.step-body').appendChild(badge);
     }
-    
+
     // 避免大范围滚动影响聊天区
     const container = typeof Chat !== 'undefined' ? Chat.getActiveThoughtContainer() : null;
     if (container) {
-       container.scrollTop = container.scrollHeight;
+      container.scrollTop = container.scrollHeight;
     }
   }
 
@@ -172,7 +170,7 @@ const Panel = (() => {
   function addDebateBubble(role, avatar, content) {
     const warRoomSectionEl = getActiveEl('.war-room-section');
     const debateBubblesEl = getActiveEl('.debate-bubbles');
-    
+
     if (warRoomSectionEl) warRoomSectionEl.classList.remove('hidden');
     if (!debateBubblesEl) return;
 

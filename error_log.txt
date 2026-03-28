@@ -1,0 +1,3 @@
+browser-use 未安装，Browser Agent 功能不可用
+playwright 未安装，部分 Browser Agent 功能不可用
+langchain-tavily 未安装，Tavily 搜索不可用

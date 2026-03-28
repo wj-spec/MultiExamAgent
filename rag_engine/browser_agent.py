@@ -21,21 +21,36 @@ logger = logging.getLogger(__name__)
 
 # browser-use 可用性检查
 try:
-    from browser_use import Agent as BrowserAgentSDK
-    from browser_use.browser import Browser as BrowserUseBrowser
-    from browser_use.browser.context import BrowserContext as BrowserUseContext
+    # 尝试从 top-level 导入（新版 SDK）
+    try:
+        from browser_use import Agent as BrowserAgentSDK
+    except ImportError:
+        # 兼容旧版本
+        from browser_use.agent.service import Agent as BrowserAgentSDK
+    
+    # Optional components
+    try:
+        from browser_use import Browser as BrowserUseBrowser
+    except ImportError:
+        BrowserUseBrowser = None
+        
+    try:
+        from browser_use import BrowserContext as BrowserUseContext
+    except ImportError:
+        BrowserUseContext = None
+
     BROWSER_USE_AVAILABLE = True
 except ImportError:
     BROWSER_USE_AVAILABLE = False
-    logger.warning("browser-use 未安装，Browser Agent 功能不可用")
+    logger.warning("browser-use 模块导入异常，智能 Browser Agent 功能不可用。请确认已安装: pip install browser-use")
 
 # Playwright 可用性检查
 try:
-    from playwright.async_api import async_playwright, Page, Browser
+    from playwright.async_api import async_playwright
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
-    logger.warning("playwright 未安装，部分 Browser Agent 功能不可用")
+    logger.warning("playwright 未安装，基础网页爬取和截图功能不可用。请运行: playwright install")
 
 
 class BrowserAgent:

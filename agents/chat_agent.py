@@ -21,28 +21,32 @@ from utils.config import get_llm
 logger = logging.getLogger(__name__)
 
 
-CHAT_SYSTEM_PROMPT = """你是一个友善的 AI 助手，负责与用户进行自然对话。
+CHAT_SYSTEM_PROMPT = """你是 IntelliExam 的智能对话助手，一个具备场景感知能力的 ReAct Agent。
 
 ## 你的能力
 1. 回答各类问题，提供信息和帮助
 2. 联网搜索最新信息
 3. 分析用户上传的文档内容
-4. 理解和处理用户的语音输入
+4. 识别用户意图并引导切换到专业场景
+
+## 场景识别与引导规则
+
+当你判断用户有以下意图时，在回复末尾添加对应标记：
+
+**命题/出题/生成试题意图**：
+- 回复末尾添加：[SCENE_SWITCH:proposition]
+- 示例内容："了解了，您需要命题服务。切换到「命题専业场景」后，思考 Planner 将自动为您规划完整任务清单。[SCENE_SWITCH:proposition]"
+
+**审题/审卷/批改意图**：
+- 回复末尾添加：[SCENE_SWITCH:review]
+- 示例内容："您涉及审题需求。切换到「审题场景」后，上传试题或粘贴试卷内容， Planner 将制定全面的审核计划。[SCENE_SWITCH:review]"
+
+**普通对话**（不加标记，正常回复）
 
 ## 工作原则
 - 简洁友好，避免过度专业化
 - 遇到不确定的信息，主动联网核实
-- 如果用户提到命题/出题等需求，提示可以切换到专业模式
-
-## 模式切换提示
-当用户明确表达以下意图时，在回复末尾添加模式切换标记：
-- 命题/出题需求：回复末尾添加 [MODE_SWITCH:proposition]
-- 审卷/批改需求：回复末尾添加 [MODE_SWITCH:grading]
-- 组卷需求：回复末尾添加 [MODE_SWITCH:paper_generation]
-
-示例：
-用户："帮我出几道数学题"
-你的回复："好的！我可以帮您生成数学试题。为了提供更专业的命题服务，建议切换到专业模式。[MODE_SWITCH:proposition]"
+- 引导场景切换时要自然自信，不要失给
 
 ## 回复格式
 - 使用清晰的段落结构
@@ -58,27 +62,61 @@ class ChatAgent(ToolCallingAgent):
     处理通用对话需求，支持工具调用。
     """
 
-    def __init__(self, llm: Optional[BaseChatModel] = None):
+    def __init__(
+        self,
+        llm: Optional[BaseChatModel] = None,
+        extra_tools: list = None,
+        enable_skills: bool = True,
+        enable_mcp: bool = True,
+    ):
         """
         初始化基础对话 Agent
 
         Args:
             llm: 语言模型实例
+            extra_tools: 额外工具列表（由调用方提供）
+            enable_skills: 是否启用 Skills 系统工具注入
+            enable_mcp: 是否启用 MCP 工具注入
         """
         # 延迟导入工具，避免循环依赖
         from agents.tools.search_tools import SearchInternetTool, BrowseWebTool
         from agents.tools.attachment_tools import AnalyzeAttachmentTool
         from agents.tools.speech_tools import TextNormalizeTool
+        from tools.retriever import KnowledgeSearchTool
+
+        base_tools = [
+            SearchInternetTool(),
+            BrowseWebTool(),
+            AnalyzeAttachmentTool(),
+            TextNormalizeTool(),
+            KnowledgeSearchTool(),
+        ]
+
+        # 合并额外工具
+        all_tools = base_tools + (extra_tools or [])
+
+        # 注入 Skills 工具
+        if enable_skills:
+            try:
+                from skills.registry import get_skills_for_node
+                skill_tools = get_skills_for_node("chat")
+                all_tools.extend(skill_tools)
+            except Exception:
+                pass
+
+        # 注入 MCP 工具
+        if enable_mcp:
+            try:
+                from utils.mcp_client import get_mcp_tools_sync
+                mcp_tools = get_mcp_tools_sync()
+                all_tools.extend(mcp_tools)
+            except Exception:
+                pass
 
         super().__init__(
             llm=llm or get_llm(temperature=0.7),
-            tools=[
-                SearchInternetTool(),
-                BrowseWebTool(),
-                AnalyzeAttachmentTool(),
-                TextNormalizeTool(),
-            ],
-            max_iterations=3,
+            tools=all_tools,
+            max_iterations=4,
             verbose=False
         )
 
@@ -94,7 +132,8 @@ class ChatAgent(ToolCallingAgent):
         self,
         user_input: str,
         chat_history: List[Dict] = None,
-        attachments: List[Dict] = None
+        attachments: List[Dict] = None,
+        current_scene: str = "chat"
     ) -> Dict[str, Any]:
         """
         执行基础对话
@@ -103,6 +142,7 @@ class ChatAgent(ToolCallingAgent):
             user_input: 用户输入
             chat_history: 对话历史
             attachments: 附件列表 [{"filename": "", "content": "", "type": ""}]
+            current_scene: 当前所在的场景名称
 
         Returns:
             {
@@ -112,7 +152,9 @@ class ChatAgent(ToolCallingAgent):
             }
         """
         # 构建消息
-        messages = [SystemMessage(content=self.system_prompt)]
+        sys_prompt = self.system_prompt
+        sys_prompt += f"\n\n【系统状态】当前用户已经处于「{current_scene}」场景。如果用户的意图正好符合当前场景（例如已经在命题场景下要求命题），请直接推进对话或安抚用户响应，**绝对不要**再输出 [SCENE_SWITCH] 标记，也**不要**在回复里建议继续切换场景。"
+        messages = [SystemMessage(content=sys_prompt)]
 
         # 添加对话历史
         if chat_history:
@@ -181,17 +223,19 @@ class ChatAgent(ToolCallingAgent):
 
     def _detect_mode_switch(self, response: str) -> Optional[str]:
         """
-        检测回复中的模式切换标记
-
-        Args:
-            response: AI 回复
-
-        Returns:
-            模式名称或 None
+        检测回复中的模式/场景切换标记
+        支持旧版 [MODE_SWITCH:x] 和 v3.0 [SCENE_SWITCH:x]
         """
-        match = re.search(r'\[MODE_SWITCH:(\w+)\]', response)
-        if match:
-            return match.group(1)
+        # v3.0 场景标记（优先）
+        m = re.search(r'\[SCENE_SWITCH:(proposition|review)\]', response)
+        if m:
+            return m.group(1)
+        # 兼容旧版标记
+        m2 = re.search(r'\[MODE_SWITCH:(\w+)\]', response)
+        if m2:
+            mode = m2.group(1)
+            # 映射旧模式到新场景
+            return {'proposition': 'proposition', 'grading': 'review', 'paper_generation': 'proposition'}.get(mode, mode)
         return None
 
 
@@ -218,7 +262,8 @@ def chat_node(state: Dict[str, Any]) -> Dict[str, Any]:
     result = agent.chat(
         user_input=state["user_input"],
         chat_history=state.get("chat_history", []),
-        attachments=state.get("attachments", [])
+        attachments=state.get("attachments", []),
+        current_scene=state.get("scene", "chat")
     )
 
     # 更新状态
@@ -227,15 +272,21 @@ def chat_node(state: Dict[str, Any]) -> Dict[str, Any]:
     new_state["next_node"] = "end"
     new_state["should_continue"] = False
 
-    # 如果检测到模式切换
-    if result.get("mode_switch"):
-        new_state["mode_transition"] = "enter"
-        new_state["proposition_needed"] = True
-        new_state["primary_intent"] = result["mode_switch"]
+    # v3.0: 场景切换建议
+    scene_hint = result.get("mode_switch")
+    current_scene = state.get("scene", "chat")
+    
+    if scene_hint in ("proposition", "review") and scene_hint != current_scene:
+        new_state["scene_switch_hint"] = scene_hint
         new_state = add_status_message(
             new_state,
-            f"🔄 检测到专业模式需求: {result['mode_switch']}"
+            f"📍 建议切换至: {'命题' if scene_hint == 'proposition' else '审题'}场景"
         )
+
+        # 兼容旧版字段
+        new_state["mode_transition"] = "enter"
+        new_state["proposition_needed"] = True
+        new_state["primary_intent"] = scene_hint
 
     # 记录使用的工具
     if result.get("used_tools"):

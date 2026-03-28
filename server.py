@@ -8,6 +8,7 @@ IntelliExam-Agent FastAPI 服务
 """
 
 from api.mode_api import router as mode_router
+from api.todo_api import router as todo_router
 from tools.retriever import get_retriever, VECTOR_STORE_AVAILABLE
 from agents.executor_agent import format_questions_response
 from utils.memory_manager import get_memory_manager
@@ -35,7 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 app = FastAPI(
     title="IntelliExam-Agent API",
     description="AI 智能命题系统后端服务",
-    version="2.0.0"
+    version="3.0.0"
 )
 
 app.add_middleware(
@@ -56,18 +57,27 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     """
     WebSocket 实时通信端点
 
-    消息协议：
-      客户端→服务端: {"type": "message", "content": "...", "conversation_id": "..."}
+    消息协议（v3.0）：
+      客户端→服务端: {"type": "message", "content": "...", "conversation_id": "...", "scene": "chat|proposition|review"}
                      {"type": "ping"}
                      {"type": "switch_conversation", "conversation_id": "..."}
+                     {"type": "switch_scene", "scene": "chat|proposition|review"}
+                     {"type": "todo_confirm", "group_id": "..."}
+                     {"type": "todo_replan", "group_id": "...", "feedback": "..."}
 
       服务端→客户端: {"type": "connected", "session_id": "...", "conversation_id": "..."}
-                     {"type": "agent_step", "step": "...", "status": "running|done|error", "detail": "...", "elapsed": "1.2s"}
+                     {"type": "agent_step", "step": "...", "status": "running|done|error", ...}
                      {"type": "agent_params", "params": {...}}
                      {"type": "response", "content": "..."}
-                     {"type": "result", "markdown": "...", "question_count": 5, "topic": "..."}
+                     {"type": "result", "markdown": "...", ...}
                      {"type": "error", "message": "..."}
                      {"type": "pong"}
+                     {"type": "scene_switched", "scene": "..."}
+                     --- v3.0 待办事件 ---
+                     {"type": "todo_group_created", "group": {...}}         — Planner 生成任务组
+                     {"type": "todo_task_update", "task": {...}}             — 任务状态变更
+                     {"type": "todo_task_result", "task_id": "...", "result": "..."}  — 任务完成
+                     {"type": "todo_comment_added", "task_id": "...", "comment": {...}} — 新评论
     """
     await websocket.accept()
 
@@ -148,8 +158,112 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     })
                     continue
 
+            # ---- v3.0: 切换场景 ----
+            if msg_type == "switch_scene":
+                scene = data.get("scene", "chat")
+                if session_id in sessions:
+                    sessions[session_id]["scene"] = scene
+                await websocket.send_json({
+                    "type": "scene_switched",
+                    "scene": scene,
+                })
+                continue
+
+            # ---- v3.0: 确认执行任务组 ----
+            if msg_type == "todo_confirm":
+                group_id = data.get("group_id", "")
+                if group_id:
+                    from services.todo_service import TodoService
+                    TodoService.update_group_status(group_id, "running")
+                    group = TodoService.get_group(group_id)
+                    if group:
+                        import asyncio
+                        from agents.proposition.solver import PropositionSolver
+                        solver = PropositionSolver()
+                        async def _on_update(msg):
+                            await websocket.send_json(msg)
+                        
+                        user_input = session_data.get("user_input", "")
+                        asyncio.create_task(
+                            solver.execute_group(group, user_input, on_update=_on_update)
+                        )
+                continue
+
+            # ---- v3.1: 大纲确认 ----
+            if msg_type == "outline_confirm":
+                outline = data.get("outline", {})
+                group_id = data.get("group_id", "")
+                if outline:
+                    # 用户确认大纲，开始执行任务
+                    await websocket.send_json({
+                        "type": "outline_confirmed",
+                        "outline": outline,
+                        "message": "大纲已确认，开始执行..."
+                    })
+                    # TODO: 触发 Solver 执行
+                continue
+
+            # ---- v3.1: 大纲修改 ----
+            if msg_type == "outline_modify":
+                outline = data.get("outline", {})
+                feedback = data.get("feedback", "")
+                group_id = data.get("group_id", "")
+                if feedback:
+                    # 触发重新规划
+                    try:
+                        from agents.proposition.planner import PropositionPlanner
+                        planner = PropositionPlanner()
+                        new_plan = planner.replan(outline, feedback)
+
+                        # 发送更新的大纲
+                        await websocket.send_json({
+                            "type": "outline_updated",
+                            "outline": {
+                                "title": new_plan.title,
+                                "description": new_plan.summary,
+                                "examSpec": {},
+                                "questionDistribution": [
+                                    {"type": t.title, "count": 1,
+                                        "percentage": 100 / len(new_plan.tasks)}
+                                    for t in new_plan.tasks
+                                ],
+                                "difficultyDistribution": {"easy": 0, "medium": 0, "hard": 0},
+                                "estimatedTime": "约2-5分钟"
+                            }
+                        })
+                    except Exception as e:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": f"大纲修改失败: {str(e)}"
+                        })
+                continue
+
+            # ---- v3.0: 执行单个任务 ----
+            if msg_type == "todo_run_task":
+                task_id = data.get("task_id", "")
+                group_id = data.get("group_id", "")
+                if task_id:
+                    from services.todo_service import TodoService
+                    task = TodoService.get_task(task_id)
+                    if task:
+                        # 异步执行（避免阻塞 WS 循环）
+                        import asyncio
+                        from agents.proposition.solver import PropositionSolver
+                        sess = sessions.get(session_id, {})
+                        user_q = sess.get("state", {}).get("user_input", "")
+                        solver = PropositionSolver()
+
+                        async def _run_task():
+                            await solver.execute_task(
+                                task, user_q,
+                                on_update=lambda evt: websocket.send_json(evt)
+                            )
+                        asyncio.create_task(_run_task())
+                continue
+
             # ---- 用户发送消息 ----
             if msg_type == "message":
+
                 content = data.get("content", "").strip()
                 if not content:
                     continue
@@ -183,6 +297,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                                 now - step_timers.get(s["step"], now)).total_seconds()
                             s["status"] = "done"
                             s["elapsed"] = f"{elapsed:.1f}s"
+
+                            # v3.1: 发送多种事件类型
+                            # 1. agent_step (兼容旧版)
                             await websocket.send_json({
                                 "type": "agent_step",
                                 "step": s["step_name"],
@@ -191,6 +308,15 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                                 "elapsed": s["elapsed"],
                                 "step_id": s["step"],
                                 "parent_id": s.get("parent_id")
+                            })
+
+                            # 2. status_update (v3.1 新增)
+                            await websocket.send_json({
+                                "type": "status_update",
+                                "status": "done",
+                                "step": s["step_name"],
+                                "progress": 100,
+                                "elapsed": s["elapsed"]
                             })
 
                     # 记录新步骤状态
@@ -289,6 +415,21 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                         "type": "mode_suggest",
                         "suggested_mode": mode_switch,
                         "transition": mode_transition
+                    })
+
+                # ---- v3.0: 场景切换建议（Chat Agent 检测命题/审题意图）----
+                scene_hint = result.get("scene_switch_hint")
+                if scene_hint in ("proposition", "review"):
+                    await websocket.send_json({
+                        "type": "scene_switch_hint",
+                        "scene": scene_hint,
+                    })
+
+                # ---- v3.2: 任务看板挂起与推送 ----
+                if "current_todo_group" in result:
+                    await websocket.send_json({
+                        "type": "todo_group_created",
+                        "group": result["current_todo_group"],
                     })
 
                 chart_history_updated = chat_history + [{
@@ -544,6 +685,8 @@ frontend_dir = os.path.join(os.path.dirname(
 
 # 注册模式切换 API
 app.include_router(mode_router)
+# 注册待办任务 API (v3.0)
+app.include_router(todo_router)
 
 
 @app.get("/")
@@ -557,6 +700,14 @@ app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="static")
 # ==================== 启动入口 ====================
 
 if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "server:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        reload_dirs=["."]
+    )
     import uvicorn
     uvicorn.run(
         "server:app",

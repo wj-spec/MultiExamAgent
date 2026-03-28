@@ -13,7 +13,7 @@ const Chat = (() => {
 
   // 翻页重生成支持
   let isRegenerating = false;
-  let currentAssistantRow = null; 
+  let currentAssistantRow = null;
   // 维护当前正在操作的 AI 气泡的数据版本 { versions: [], currentIndex: 0 }
   // 实际数据结构我们可以挂载在 DOM 上，或者全局维护
 
@@ -63,18 +63,24 @@ const Chat = (() => {
       chatInputEl.style.height = Math.min(chatInputEl.scrollHeight, 180) + 'px';
     });
 
-    // 示例卡片点击
+    // 示例卡片点击 - 自动切换场景并发送
     document.addEventListener('click', (e) => {
       const btn = e.target.closest('.example-card-btn') || e.target.closest('.example-card');
       if (!btn) return;
       const card = btn.closest('.example-card');
       if (!card) return;
       const prompt = card.dataset.prompt;
-      if (prompt) {
-        chatInputEl.value = prompt;
-        chatInputEl.style.height = 'auto';
-        chatInputEl.style.height = Math.min(chatInputEl.scrollHeight, 180) + 'px';
-        chatInputEl.focus();
+      const scene = card.dataset.scene;  // 获取目标场景
+      if (prompt && onSendMessage) {
+        // 如果有指定场景，先切换场景
+        if (scene && typeof SceneManager !== 'undefined') {
+          SceneManager.switchScene(scene);
+          // 触发事件清除待显示的场景切换建议
+          window.dispatchEvent(new CustomEvent('scene:user-switched'));
+        }
+        // 发送消息
+        hideWelcome();
+        onSendMessage(prompt);
       }
     });
 
@@ -93,6 +99,15 @@ const Chat = (() => {
 
     chatInputEl.value = '';
     chatInputEl.style.height = 'auto';
+
+    // 检查是否在审题场景，需要组合粘贴区域的内容
+    if (typeof SceneManager !== 'undefined' && SceneManager.getCurrentScene() === 'review') {
+      const messageData = SceneManager.buildReviewMessage(content);
+      if (messageData && onSendMessage) {
+        onSendMessage(messageData.content);
+      }
+      return;
+    }
 
     if (onSendMessage) onSendMessage(content);
   }
@@ -139,24 +154,24 @@ const Chat = (() => {
 
     const thoughtHtml = `
       <div class="inline-thought-process">
-        <div class="thinking-header" style="display:flex; gap:8px; align-items:center; user-select:none; font-size:12px; color:var(--text-secondary); background:rgba(255,255,255,0.02); padding:8px 12px; border-radius:6px; border:var(--glass-border);">
-          <div class="thinking-status" style="display:flex; align-items:center; gap:8px;">
-             <span class="spinner-border spinner-border-sm text-brand" style="width:12px; height:12px; border-width:2px;"></span>
+        <div class="thinking-header">
+          <div class="thinking-status">
+             <span class="spinner-border spinner-border-sm text-brand"></span>
              <span class="thinking-text">🤖 深入思考中 · 检索知识...</span>
           </div>
-          <span class="chevron" style="margin-left:auto; transition:transform 0.3s; transform:rotate(180deg);">▼</span>
+          <span class="chevron">▼</span>
         </div>
-        <div class="thinking-body" style="margin-top:8px; border-top:1px solid var(--border); padding-top:8px; display:flex; flex-direction:column; gap:10px;">
+        <div class="thinking-body">
           <!-- 执行步骤 -->
-          <div class="panel-section" style="padding:0; border:none;">
-            <div class="panel-section-title" style="font-size:10px; margin-bottom:6px;">执行步骤</div>
+          <div class="panel-section">
+            <div class="panel-section-title">执行步骤</div>
             <div class="step-list"></div>
           </div>
           <!-- 专家组审核 -->
-          <div class="war-room-section hidden panel-section" style="padding:0; border:none;">
-            <div class="panel-section-title" style="display:flex; align-items:center; gap:6px; font-size:10px; margin-bottom:6px;">
+          <div class="war-room-section hidden panel-section">
+            <div class="panel-section-title">
                ⚔️ 专家组审核
-               <span class="debate-status-dot" style="width:6px; height:6px; background:var(--brand); border-radius:50%; box-shadow:0 0 4px var(--brand); animation:pulse 1.5s infinite;"></span>
+               <span class="debate-status-dot"></span>
             </div>
             <div class="debate-container debate-bubbles"></div>
           </div>
@@ -169,7 +184,7 @@ const Chat = (() => {
       if (bubble) {
         bubble.innerHTML = thoughtHtml;
         const actions = currentAssistantRow.querySelector('.msg-actions-container');
-        if (actions) actions.style.display = 'none'; 
+        if (actions) actions.style.display = 'none';
         bindThoughtProcessEvents(bubble.querySelector('.inline-thought-process'));
       }
     } else {
@@ -231,21 +246,21 @@ const Chat = (() => {
 
     // 清理克隆过来的 DOM 的动画和状态，将其收起
     if (oldThoughtDOM) {
-       const spinner = oldThoughtDOM.querySelector('.spinner-border');
-       if (spinner) spinner.remove();
-       const title = oldThoughtDOM.querySelector('.thinking-text');
-       if (title) title.textContent = '🤖 思考过程记录 (\u5df2\u5b8c\u6210)';
-       const dot = oldThoughtDOM.querySelector('.debate-status-dot');
-       if (dot) dot.style.animation = 'none';
+      const spinner = oldThoughtDOM.querySelector('.spinner-border');
+      if (spinner) spinner.remove();
+      const title = oldThoughtDOM.querySelector('.thinking-text');
+      if (title) title.textContent = '🤖 思考过程记录 (\u5df2\u5b8c\u6210)';
+      const dot = oldThoughtDOM.querySelector('.debate-status-dot');
+      if (dot) dot.style.animation = 'none';
 
-       // 默认折叠它
-       const body = oldThoughtDOM.querySelector('.thinking-body');
-       if (body) body.classList.add('hidden');
-       const chevron = oldThoughtDOM.querySelector('.chevron');
-       if (chevron) chevron.style.transform = 'rotate(0deg)';
-       
-       // 重新绑定克隆节点的点击事件
-       bindThoughtProcessEvents(oldThoughtDOM);
+      // 默认折叠它
+      const body = oldThoughtDOM.querySelector('.thinking-body');
+      if (body) body.classList.add('hidden');
+      const chevron = oldThoughtDOM.querySelector('.chevron');
+      if (chevron) chevron.style.transform = 'rotate(0deg)';
+
+      // 重新绑定克隆节点的点击事件
+      bindThoughtProcessEvents(oldThoughtDOM);
     }
 
     // 移除独立的打字指示容器
@@ -266,14 +281,14 @@ const Chat = (() => {
     } else {
       row = document.createElement('div');
       row.className = 'message-row assistant';
-      
+
       const avatar = document.createElement('div');
       avatar.className = 'message-avatar';
       avatar.textContent = '🤖';
-      
+
       const bubble = document.createElement('div');
       bubble.className = 'message-bubble';
-      
+
       const actionsContainer = document.createElement('div');
       actionsContainer.className = 'msg-actions-container';
 
@@ -292,7 +307,7 @@ const Chat = (() => {
     }
 
     renderBubbleVersion(row, bubbleInfo);
-    
+
     scrollToBottom();
     return row;
   }
@@ -301,18 +316,18 @@ const Chat = (() => {
   function renderBubbleVersion(row, bubbleInfo) {
     const { versions, currentIndex } = bubbleInfo;
     const { content, resultData, thoughtDOM } = versions[currentIndex];
-    
+
     const bubble = row.querySelector('.message-bubble');
     const actionsContainer = row.querySelector('.msg-actions-container');
 
     // ---- 渲染主体内容 ----
     bubble.innerHTML = '';
-    
+
     // 如果存在思考过程 DOM，附加在上方
     if (thoughtDOM) {
       bubble.appendChild(thoughtDOM);
     }
-    
+
     // 渲染 Markdown 正文
     const contentDiv = document.createElement('div');
     contentDiv.className = 'markdown-body';
@@ -334,7 +349,7 @@ const Chat = (() => {
     if (versions.length > 1) {
       const pagination = document.createElement('div');
       pagination.className = 'message-pagination';
-      
+
       const prevBtn = document.createElement('button');
       prevBtn.className = 'page-btn page-prev';
       prevBtn.textContent = '◀';
@@ -360,7 +375,7 @@ const Chat = (() => {
       pagination.appendChild(prevBtn);
       pagination.appendChild(dot);
       pagination.appendChild(nextBtn);
-      
+
       // 插入到 bubble 最开头
       bubble.insertBefore(pagination, bubble.firstChild);
     }
@@ -553,34 +568,34 @@ const Chat = (() => {
 
     // 如果 markdown 中本身混入了 mermaid 代码块
     const mermaidNodes = bubbleEl.querySelectorAll('code.language-mermaid');
-    
+
     // 如果没有自带节点且传了拓扑数据，我们手动给它加一个
     if (mermaidNodes.length === 0 && topologyCode) {
-        // 尝试解析纯代码部分
-        const match = topologyCode.match(/```mermaid[\s\S]*?\n([\s\S]+?)```/);
-        if (match) {
-            topologyCode = match[1];
-        } else {
-            topologyCode = topologyCode.replace(/```mermaid/g, '').replace(/```/g, '');
-        }
+      // 尝试解析纯代码部分
+      const match = topologyCode.match(/```mermaid[\s\S]*?\n([\s\S]+?)```/);
+      if (match) {
+        topologyCode = match[1];
+      } else {
+        topologyCode = topologyCode.replace(/```mermaid/g, '').replace(/```/g, '');
+      }
 
-        const container = document.createElement('div');
-        container.className = 'mermaid-chart-container';
-        container.innerHTML = `
+      const container = document.createElement('div');
+      container.className = 'mermaid-chart-container';
+      container.innerHTML = `
             <div class="mermaid-title">🧠 GraphRAG 知识溯源</div>
             <div class="mermaid-content"></div>
         `;
-        bubbleEl.appendChild(container);
-        
-        try {
-            const id = 'mermaid-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
-            const { svg } = await mermaid.render(id, topologyCode);
-            container.querySelector('.mermaid-content').innerHTML = svg;
-        } catch (err) {
-            console.error('Mermaid render error:', err);
-            container.innerHTML = '<div style="color:red;font-size:12px;">图表渲染失败</div>';
-        }
-        return;
+      bubbleEl.appendChild(container);
+
+      try {
+        const id = 'mermaid-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+        const { svg } = await mermaid.render(id, topologyCode);
+        container.querySelector('.mermaid-content').innerHTML = svg;
+      } catch (err) {
+        console.error('Mermaid render error:', err);
+        container.innerHTML = '<div style="color:red;font-size:12px;">图表渲染失败</div>';
+      }
+      return;
     }
 
     // 处理 markdown 原本解析到的所有 mermaid 代码块
@@ -588,10 +603,10 @@ const Chat = (() => {
       const preEl = codeEl.parentElement;
       if (!preEl) continue;
       const codeText = codeEl.textContent;
-      
+
       const container = document.createElement('div');
       container.className = 'mermaid-chart-container';
-      
+
       try {
         const id = 'mermaid-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
         const { svg } = await mermaid.render(id, codeText);

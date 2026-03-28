@@ -403,7 +403,9 @@ async def chat_reply_node(state: AgentState, callback: StatusCallback) -> AgentS
         llm = get_llm(temperature=0.7)
         chat_history = []
         for msg in state["chat_history"][-5:]:
-            chat_history.append((msg["role"], msg["content"]))
+            # Map role names to langchain expected names
+            role = "human" if msg["role"] in ("user", "human") else "ai"
+            chat_history.append((role, msg["content"]))
 
         chain = CHAT_PROMPT | llm
         response = chain.invoke({
@@ -414,6 +416,9 @@ async def chat_reply_node(state: AgentState, callback: StatusCallback) -> AgentS
         await _cb(callback, StepNames.CHAT, "💬 已生成回复")
 
     except Exception as e:
+        import traceback
+        print(f"[ERROR] chat_reply_node 异常: {e}")
+        traceback.print_exc()
         final_response = "您好！我是 IntelliExam 命题助手，可以帮助您生成各类试题。请告诉我您需要什么类型的题目？"
         await _cb(callback, StepNames.CHAT, "⚠️ 回复生成失败，使用默认回复")
 
@@ -461,44 +466,18 @@ async def run_workflow_async_server(
             state = await cognitive_node(state, status_callback)
 
             if state["is_info_complete"]:
-                # 4. 规划
-                state = await planner_node(state, status_callback)
+                # 4. 新版大纲规划 (生成完毕即挂起，交由左侧看板接管)
+                from agents.proposition.planner import proposition_planner_node
+                
+                async def _ws_send(msg):
+                    # 通过状态回调将 ws 事件传递出去，或者仅存入 state 后在 server.py 统一发送
+                    # 这里为了解耦，我们将 group 放入 state
+                    pass
 
-                # 5. 知识检索
-                state = await knowledge_retrieval_node(state, status_callback)
-
-                # 6. 生成-审核循环
-                max_iterations = 4
-                iteration = 0
-                while iteration < max_iterations:
-                    state = await creator_node(state, status_callback)
-
-                    if not state.get("draft_questions"):
-                        state["final_response"] = "抱歉，试题生成失败，请重试。"
-                        state["should_continue"] = False
-                        break
-
-                    state = await auditor_node(state, status_callback, debate_callback)
-
-                    if state.get("audit_passed", False):
-                        break
-
-                    revision_count = state.get("revision_count", 0)
-                    max_revisions = state.get("max_revisions", 3)
-                    if revision_count >= max_revisions:
-                        state["audit_passed"] = True
-                        break
-
-                    iteration += 1
-
-                # 7. 记忆沉淀 & 生成最终响应
-                if state.get("draft_questions"):
-                    state = await consolidator_node(state, status_callback)
-                elif not state.get("final_response"):
-                    state["final_response"] = "抱歉，试题生成失败，请稍后重试。"
-
-                    if not state.get("is_info_complete", False):
-                        state = await ask_user_node(state, status_callback, speculative_callback)
+                state = await proposition_planner_node(state, _ws_send)
+                if "current_todo_group" in state:
+                    state["final_response"] = "我已经为您生成了「命题任务指挥看板」，请在左侧侧边栏中确认或修改大纲。确认无误后随时可点击各个任务开始独立执行。"
+                state["should_continue"] = False
             else:
                 # 追问用户
                 state = await ask_user_node(state, status_callback, speculative_callback)

@@ -1,8 +1,8 @@
 """
-启动脚本
+启动脚本 (main.py)
 
-提供简单的命令行入口来运行和测试项目。
-支持 Chainlit 和 Streamlit 两种前端模式。
+提供命令行入口来运行 IntelliExam-Agent 服务。
+前端：自定义 HTML/CSS/JS + FastAPI + WebSocket（已替换旧 Chainlit 方案）
 """
 
 import argparse
@@ -13,32 +13,19 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
-def run_chainlit():
-    """启动 Chainlit 应用（推荐）"""
-    import subprocess
-    print("🚀 启动 Chainlit 服务...")
-    print("📍 访问地址: http://localhost:8000")
+def run_server(host: str = "0.0.0.0", port: int = 8000, reload: bool = True):
+    """启动 FastAPI + WebSocket 服务（推荐）"""
+    import uvicorn
+    print("🚀 IntelliExam-Agent 启动中...")
+    print(f"📍 访问地址: http://localhost:{port}")
     print("📖 按 Ctrl+C 停止服务\n")
-    subprocess.run([
-        sys.executable, "-m", "chainlit", "run", "app.py",
-        "-w",  # 自动重载
-        "--port", "8000"
-    ])
-
-
-def run_streamlit():
-    """启动 Streamlit 应用（备选）"""
-    import subprocess
-    print("🚀 启动 Streamlit 服务...")
-    print("📍 访问地址: http://localhost:8501")
-    print("📖 按 Ctrl+C 停止服务\n")
-    subprocess.run([
-        sys.executable, "-m", "streamlit", "run", "app_streamlit.py",
-        "--server.port", "8501",
-        "--server.address", "localhost"
-    ])
-
-
+    uvicorn.run(
+        "server:app",
+        host=host,
+        port=port,
+        reload=reload,
+        log_level="info"
+    )
 
 
 def run_cli():
@@ -90,26 +77,38 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  python main.py web        # 启动 Chainlit 前端（推荐）
-  python main.py streamlit  # 启动 Streamlit 前端（备选）
-  python main.py cli        # 命令行交互模式
-  python main.py test       # 运行测试
+  python main.py web          # 启动 FastAPI 服务（默认，推荐）
+  python main.py web --port 9000        # 指定端口
+  python main.py web --no-reload        # 生产模式（不自动重载）
+  python main.py cli          # 命令行交互模式
+
+直接启动（等价于 python main.py web）:
+  uvicorn server:app --host 0.0.0.0 --port 8000 --reload
         """
     )
-    parser.add_argument(
-        "command",
-        choices=["web", "streamlit", "cli"],
-        help="运行模式: web=Chainlit界面(推荐), streamlit=Streamlit界面, cli=命令行模式"
-    )
+    subparsers = parser.add_subparsers(dest="command")
+
+    # web 子命令
+    web_parser = subparsers.add_parser("web", help="启动 FastAPI Web 服务（推荐）")
+    web_parser.add_argument("--host", default="0.0.0.0", help="监听地址（默认 0.0.0.0）")
+    web_parser.add_argument("--port", type=int, default=8000, help="端口号（默认 8000）")
+    web_parser.add_argument("--no-reload", dest="reload", action="store_false",
+                            default=True, help="关闭自动重载（生产环境）")
+
+    # cli 子命令
+    subparsers.add_parser("cli", help="命令行交互模式")
 
     args = parser.parse_args()
 
-    if args.command == "web":
-        run_chainlit()
-    elif args.command == "streamlit":
-        run_streamlit()
+    if args.command == "web" or args.command is None:
+        host = getattr(args, "host", "0.0.0.0")
+        port = getattr(args, "port", 8000)
+        reload = getattr(args, "reload", True)
+        run_server(host=host, port=port, reload=reload)
     elif args.command == "cli":
         run_cli()
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":

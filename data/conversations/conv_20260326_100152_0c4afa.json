@@ -1,0 +1,38 @@
+{
+  "id": "conv_20260326_100152_0c4afa",
+  "title": "对话 2026-03-26 10:01",
+  "created_at": "2026-03-26T10:01:52.767767",
+  "updated_at": "2026-03-26T10:04:31.707695",
+  "message_count": 4,
+  "metadata": {},
+  "messages": [
+    {
+      "id": "msg_7c41c4d4",
+      "role": "user",
+      "content": "帮我出5道高中数学导数的选择题，难度中等，要求考察函数的单调性与极值",
+      "timestamp": "2026-03-26T10:02:18.824573",
+      "metadata": {}
+    },
+    {
+      "id": "msg_ad48553c",
+      "role": "assistant",
+      "content": "# 生成的试题\n\n## 第 1 题\n\n**题型**: 选择题\n**难度**: 中等\n**知识点**: 导数\n\n函数 f(x) = x^3 - 3x 的导数是？\n\nA. 3x^2 - 3\nB. 3x^2 + 3\nC. x^2 - 3\nD. 3x - 3\n\n<details>\n<summary>点击查看答案与解析</summary>\n\n**答案**: A\n\n**解析**: 根据导数的基本规则，f'(x) = 3x^2 - 3。\n\n</details>\n\n---\n\n## 第 2 题\n\n**题型**: 选择题\n**难度**: 中等\n**知识点**: 导数\n\n若 f(x) = sin(x)，则 f'(x) 是？\n\nA. cos(x)\nB. -cos(x)\nC. sin(x)\nD. -sin(x)\n\n<details>\n<summary>点击查看答案与解析</summary>\n\n**答案**: A\n\n**解析**: 根据基本导数公式，sin(x) 的导数是 cos(x)。\n\n</details>\n\n---\n\n## 第 3 题\n\n**题型**: 选择题\n**难度**: 中等\n**知识点**: 导数\n\n设 f(x) = e^{2x}，则 f'(x) 是？\n\nA. 2e^{2x}\nB. e^{2x}\nC. 2e^x\nD. e^x\n\n<details>\n<summary>点击查看答案与解析</summary>\n\n**答案**: A\n\n**解析**: 利用链式法则，f'(x) = 2e^{2x}。\n\n</details>\n\n---\n\n## 第 4 题\n\n**题型**: 选择题\n**难度**: 中等\n**知识点**: 导数\n\n函数 f(x) = ln(x^2) 的导数是？\n\nA. 2/x\nB. 1/x\nC. x/2\nD. 2x\n\n<details>\n<summary>点击查看答案与解析</summary>\n\n**答案**: A\n\n**解析**: 利用对数的性质和导数公式，f'(x) = 2/x。\n\n</details>\n\n---\n\n## 第 5 题\n\n**题型**: 选择题\n**难度**: 中等\n**知识点**: 导数\n\n若 f(x) = x^2 * cos(x)，则 f'(x) 是？\n\nA. 2x cos(x) - x^2 sin(x)\nB. 2x cos(x) + x^2 sin(x)\nC. x^2 cos(x)\nD. 2x sin(x)\n\n<details>\n<summary>点击查看答案与解析</summary>\n\n**答案**: A\n\n**解析**: 使用乘积法则，f'(x) = 2x cos(x) - x^2 sin(x)。\n\n</details>\n\n---\n\n",
+      "timestamp": "2026-03-26T10:02:18.846332",
+      "metadata": {}
+    },
+    {
+      "id": "msg_fa838028",
+      "role": "user",
+      "content": "重新生成整套试卷",
+      "timestamp": "2026-03-26T10:04:31.689016",
+      "metadata": {}
+    },
+    {
+      "id": "msg_063f165e",
+      "role": "assistant",
+      "content": "# 生成的试题\n\n## 第 1 题\n\n**题型**: 选择题\n**难度**: 中等\n**知识点**: 高中数学导数\n\n函数 f(x) = x^3 - 3x 的单调递增区间是？\n\nA. (-∞, -1)\nB. (-1, 1)\nC. (1, +∞)\nD. (-∞, -1) 和 (1, +∞)\n\n<details>\n<summary>点击查看答案与解析</summary>\n\n**答案**: D\n\n**解析**: 对 f(x) 求导得 f'(x) = 3x^2 - 3。令 f'(x) > 0，解得 x < -1 或 x > 1，因此函数在 (-∞, -1) 和 (1, +∞) 上单调递增。\n\n</details>\n\n---\n\n## 第 2 题\n\n**题型**: 选择题\n**难度**: 中等\n**知识点**: 高中数学导数\n\n设函数 f(x) = x^3 - 6x^2 + 9x，其极值点为？\n\nA. x=1\nB. x=3\nC. x=1 和 x=3\nD. x=0\n\n<details>\n<summary>点击查看答案与解析</summary>\n\n**答案**: C\n\n**解析**: 对 f(x) 求导得 f'(x) = 3x^2 - 12x + 9。令 f'(x) = 0，解得 x=1 和 x=3，这两个点即为极值点。\n\n</details>\n\n---\n\n## 第 3 题\n\n**题型**: 选择题\n**难度**: 中等\n**知识点**: 高中数学导数\n\n已知函数 f(x) = e^x - x，则 f(x) 的极小值为？\n\nA. 0\nB. 1\nC. e\nD. 不存在\n\n<details>\n<summary>点击查看答案与解析</summary>\n\n**答案**: B\n\n**解析**: 对 f(x) 求导得 f'(x) = e^x - 1。令 f'(x) = 0，解得 x=0。代入原函数得 f(0) = 1，且 f''(0) = e^0 = 1 > 0，故 x=0 是极小值点，极小值为 1。\n\n</details>\n\n---\n\n## 第 4 题\n\n**题型**: 选择题\n**难度**: 中等\n**知识点**: 高中数学导数\n\n若函数 f(x) 在区间 [a, b] 上可导，且 f'(x) > 0，则 f(x) 在 [a, b] 上的单调性为？\n\nA. 单调递增\nB. 单调递减\nC. 先增后减\nD. 先减后增\n\n<details>\n<summary>点击查看答案与解析</summary>\n\n**答案**: A\n\n**解析**: 根据导数的定义，当 f'(x) > 0 时，函数在该区间上单调递增。\n\n</details>\n\n---\n\n## 第 5 题\n\n**题型**: 选择题\n**难度**: 中等\n**知识点**: 高中数学导数\n\n函数 f(x) = x^3 - 3x 的极大值为？\n\nA. -2\nB. 2\nC. 0\nD. 不存在\n\n<details>\n<summary>点击查看答案与解析</summary>\n\n**答案**: A\n\n**解析**: 对 f(x) 求导得 f'(x) = 3x^2 - 3。令 f'(x) = 0，解得 x = ±1。代入原函数得 f(-1) = -2，f(1) = 2。由于 f''(-1) = 6*(-1) = -6 < 0，故 x=-1 是极大值点，极大值为 -2。\n\n</details>\n\n---\n\n",
+      "timestamp": "2026-03-26T10:04:31.707695",
+      "metadata": {}
+    }
+  ]
+}

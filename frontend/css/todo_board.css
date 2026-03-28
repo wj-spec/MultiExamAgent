@@ -1,0 +1,774 @@
+/**
+ * todo_board.css - 待办任务看板样式
+ * 现代卡片式设计，支持状态动效与评论区交互
+ */
+
+/* ============================================================
+   看板容器
+   ============================================================ */
+
+#todo-board-panel {
+  display: none;
+  flex-direction: column;
+  width: 420px;
+  min-width: 340px;
+  max-width: 480px;
+  background: var(--bg-surface, #ffffff);
+  border-left: 1px solid var(--border-color, #e5e7eb);
+  overflow: hidden;
+  flex-shrink: 0;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#todo-board-panel.visible {
+  display: flex;
+}
+
+/* 看板标题栏 */
+.todo-board-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--border-color, #e5e7eb);
+  flex-shrink: 0;
+  background: var(--bg-surface);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.todo-board-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, #111827);
+}
+
+.todo-board-title-icon {
+  width: 20px;
+  height: 20px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 11px;
+}
+
+.todo-board-scene-badge {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 20px;
+  background: #ede9fe;
+  color: #7c3aed;
+}
+
+.todo-board-scene-badge.review {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.todo-board-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.todo-board-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  background: transparent;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text-secondary, #6b7280);
+  transition: all 0.15s;
+}
+
+.todo-board-btn:hover {
+  background: var(--bg-hover, #f3f4f6);
+  color: var(--text-primary, #111827);
+}
+
+.todo-board-btn.primary {
+  background: #6366f1;
+  color: white;
+  border-color: #6366f1;
+}
+
+.todo-board-btn.primary:hover {
+  background: #4f46e5;
+}
+
+/* Planner 规划说明区 */
+.todo-planner-summary {
+  margin: 12px 16px 0;
+  padding: 10px 12px;
+  background: linear-gradient(135deg, #f5f3ff, #ede9fe);
+  border: 1px solid #ddd6fe;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: #5b21b6;
+  line-height: 1.55;
+}
+
+.todo-planner-summary-label {
+  font-weight: 600;
+  margin-bottom: 3px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: #7c3aed;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* 任务列表滚动容器 */
+.todo-task-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  scrollbar-width: thin;
+  scrollbar-color: #d1d5db transparent;
+}
+
+.todo-task-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.todo-task-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.todo-task-list::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 4px;
+}
+
+/* ============================================================
+   任务卡片
+   ============================================================ */
+
+.todo-card {
+  background: var(--bg-surface, #fff);
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: box-shadow 0.2s, border-color 0.2s, transform 0.2s;
+  animation: cardSlideIn 0.3s ease both;
+}
+
+@keyframes cardSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.todo-card:hover {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+}
+
+/* 卡片顶部：状态条 */
+.todo-card-strip {
+  height: 3px;
+  background: #e5e7eb;
+  transition: background 0.3s;
+}
+
+.todo-card[data-status="pending"] .todo-card-strip {
+  background: #d1d5db;
+}
+
+.todo-card[data-status="ready"] .todo-card-strip {
+  background: #6366f1;
+}
+
+.todo-card[data-status="running"] .todo-card-strip {
+  background: linear-gradient(90deg, #6366f1, #8b5cf6, #6366f1);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
+}
+
+.todo-card[data-status="done"] .todo-card-strip {
+  background: #10b981;
+}
+
+.todo-card[data-status="need_revision"].todo-card-strip {
+  background: #f59e0b;
+}
+
+.todo-card[data-status="skipped"] .todo-card-strip {
+  background: #9ca3af;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* 卡片主体 */
+.todo-card-body {
+  padding: 12px 14px 10px;
+}
+
+.todo-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.todo-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #111827);
+  line-height: 1.4;
+  flex: 1;
+}
+
+.todo-card[data-status="done"] .todo-card-title {
+  color: var(--text-secondary, #6b7280);
+}
+
+.todo-card[data-status="skipped"] .todo-card-title {
+  color: #9ca3af;
+  text-decoration: line-through;
+}
+
+/* 状态Badge */
+.todo-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 20px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.todo-status-badge.pending {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.todo-status-badge.ready {
+  background: #ede9fe;
+  color: #7c3aed;
+}
+
+.todo-status-badge.running {
+  background: #dbeafe;
+  color: #2563eb;
+  animation: pulseBadge 1.5s infinite;
+}
+
+.todo-status-badge.done {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.todo-status-badge.need_revision {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.todo-status-badge.skipped {
+  background: #f3f4f6;
+  color: #9ca3af;
+}
+
+@keyframes pulseBadge {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* 描述文本 */
+.todo-card-desc {
+  font-size: 12px;
+  color: var(--text-secondary, #6b7280);
+  line-height: 1.5;
+  margin-bottom: 8px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 进度条（running 状态） */
+.todo-card-progress {
+  height: 4px;
+  background: #e5e7eb;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.todo-card-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #8b5cf6);
+  border-radius: 2px;
+  width: 0%;
+  transition: width 0.5s ease;
+  animation: progressPulse 2s infinite;
+}
+
+@keyframes progressPulse {
+  0% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.7;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+/* 计时/耗时 */
+.todo-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #9ca3af;
+  margin-bottom: 6px;
+}
+
+.todo-card-elapsed {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* 卡片操作区 */
+.todo-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.todo-card-action-btn {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+  border: 1px solid var(--border-color, #e5e7eb);
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-secondary, #6b7280);
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.todo-card-action-btn:hover {
+  background: var(--bg-hover, #f3f4f6);
+  color: var(--text-primary, #111827);
+}
+
+.todo-card-action-btn.run-btn {
+  background: #6366f1;
+  color: white;
+  border-color: #6366f1;
+}
+
+.todo-card-action-btn.run-btn:hover {
+  background: #4f46e5;
+}
+
+.todo-card-action-btn.view-btn {
+  background: #f0fdf4;
+  color: #059669;
+  border-color: #a7f3d0;
+}
+
+/* 执行结果折叠区 */
+.todo-card-result {
+  display: none;
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  font-size: 12px;
+  color: var(--text-primary, #111827);
+  line-height: 1.6;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.todo-card-result.expanded {
+  display: block;
+}
+
+.todo-card-result-markdown p {
+  margin: 4px 0;
+}
+
+.todo-card-result-markdown h1,
+.todo-card-result-markdown h2,
+.todo-card-result-markdown h3 {
+  font-size: 13px;
+  margin: 8px 0 4px;
+}
+
+.todo-card-result-markdown ul,
+.todo-card-result-markdown ol {
+  padding-left: 16px;
+}
+
+.todo-card-result-markdown code {
+  background: #e5e7eb;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 11px;
+}
+
+/* ============================================================
+   评论区
+   ============================================================ */
+
+.todo-card-comments {
+  border-top: 1px solid var(--border-color, #f3f4f6);
+  padding: 8px 14px 10px;
+  background: var(--bg-surface);
+}
+
+.todo-comments-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--text-secondary, #6b7280);
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 0;
+  transition: color 0.15s;
+}
+
+.todo-comments-toggle:hover {
+  color: #4f46e5;
+}
+
+.todo-comments-toggle .chevron {
+  transition: transform 0.2s;
+  font-size: 10px;
+}
+
+.todo-comments-toggle.open .chevron {
+  transform: rotate(90deg);
+}
+
+.todo-comments-count {
+  background: #e5e7eb;
+  color: #4b5563;
+  border-radius: 10px;
+  padding: 0 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+/* 评论列表 */
+.todo-comments-list {
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.todo-comments-list.open {
+  display: flex;
+}
+
+.todo-comment-item {
+  display: flex;
+  gap: 7px;
+  animation: commentFadeIn 0.2s ease both;
+}
+
+@keyframes commentFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.todo-comment-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.todo-comment-avatar.user {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.todo-comment-avatar.agent {
+  background: #ede9fe;
+  color: #7c3aed;
+}
+
+.todo-comment-bubble {
+  flex: 1;
+  background: #f9fafb;
+  border: 1px solid #f3f4f6;
+  border-radius: 6px;
+  padding: 6px 9px;
+}
+
+.todo-comment-bubble.agent {
+  background: #f5f3ff;
+  border-color: #ddd6fe;
+}
+
+.todo-comment-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+
+.todo-comment-author {
+  font-size: 11px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.todo-comment-time {
+  font-size: 10px;
+  color: #9ca3af;
+}
+
+.todo-comment-content {
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.5;
+}
+
+/* 评论输入框 */
+.todo-comment-input-area {
+  display: none;
+  margin-top: 8px;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.todo-comment-input-area.open {
+  display: flex;
+}
+
+.todo-comment-input {
+  flex: 1;
+  padding: 7px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  resize: none;
+  outline: none;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  transition: border-color 0.15s;
+  font-family: inherit;
+  min-height: 34px;
+  max-height: 100px;
+}
+
+.todo-comment-input:focus {
+  border-color: #6366f1;
+}
+
+.todo-comment-submit {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #6366f1;
+  border: none;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s;
+  align-self: flex-end;
+}
+
+.todo-comment-submit:hover {
+  background: #4f46e5;
+}
+
+/* ============================================================
+   空状态 & 加载状态
+   ============================================================ */
+
+.todo-board-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+  color: var(--text-secondary, #6b7280);
+  text-align: center;
+}
+
+.todo-board-empty-icon {
+  font-size: 36px;
+  margin-bottom: 12px;
+  opacity: 0.5;
+}
+
+.todo-board-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, #374151);
+  margin-bottom: 6px;
+}
+
+.todo-board-empty-desc {
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+/* 骨架屏加载 */
+.todo-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px;
+}
+
+.todo-skeleton-card {
+  background: #f3f4f6;
+  border-radius: 10px;
+  height: 80px;
+  animation: skeletonPulse 1.5s infinite;
+}
+
+@keyframes skeletonPulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* 完成全选 Banner */
+.todo-board-done-banner {
+  display: none;
+  margin: 12px 16px;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+  border: 1px solid #6ee7b7;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #065f46;
+  align-items: center;
+  gap: 8px;
+}
+
+.todo-board-done-banner.visible {
+  display: flex;
+}
+
+/* 深色模式适配 */
+@media (prefers-color-scheme: dark) {
+  #todo-board-panel {
+    background: #1e1e2e;
+    border-left-color: #313244;
+  }
+
+  .todo-card {
+    background: #252535;
+    border-color: #313244;
+  }
+
+  .todo-card-result {
+    background: #1a1a2a;
+    border-color: #313244;
+  }
+
+  .todo-comment-bubble {
+    background: #252535;
+    border-color: #313244;
+  }
+
+  .todo-comment-input {
+    background: #252535;
+    border-color: #313244;
+    color: #cdd6f4;
+  }
+}
+
+/* ============================================================
+   Diff 视图样式 & 局部重写组件样式
+   ============================================================ */
+.todo-card-result-markdown ins { background-color: #d1fae5; color: #065f46; text-decoration: none; font-weight: 500; padding: 0 2px; }
+.todo-card-result-markdown del { background-color: #fee2e2; color: #991b1b; text-decoration: line-through; opacity: 0.8; padding: 0 2px; }
+.canvas-editor-tooltip { position: absolute; display: none; z-index: 1000; background: white; border: 1px solid #e5e7eb; border-radius: 6px; padding: 4px; }
+.canvas-editor-tooltip button { background: #6366f1; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+.canvas-editor-dialog { position: fixed; display: none; z-index: 1001; background: white; border: 1px solid #e5e7eb; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); border-radius: 8px; padding: 16px; width: 320px; }
+.canvas-editor-header { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: #111827; }
+#canvas-instruction-input { width: 100%; height: 60px; border: 1px solid #d1d5db; border-radius: 4px; padding: 8px; font-size: 12px; margin-bottom: 8px; resize: none; }
+.canvas-editor-footer { display: flex; justify-content: flex-end; gap: 8px; }
+.canvas-editor-footer button { padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; border: 1px solid #e5e7eb; background: white; }
+#canvas-submit-btn { background: #6366f1; color: white; border-color: #6366f1; }

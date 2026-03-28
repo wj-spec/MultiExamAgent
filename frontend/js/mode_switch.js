@@ -88,6 +88,21 @@ const ModeSwitch = (() => {
      * 切换到指定模式
      */
     async function switchToMode(mode) {
+        // 统一使用 SceneManager 来切换场景（如果可用）
+        if (typeof SceneManager !== 'undefined') {
+            const sceneMap = {
+                chat: 'chat',
+                proposition: 'proposition',
+                grading: 'review'  // grading 对应 review 场景
+            };
+            SceneManager.switchScene(sceneMap[mode] || mode);
+            currentMode = mode;
+            updateUI();
+            saveState();
+            return;
+        }
+
+        // 回退到原有的 API 调用方式
         try {
             const response = await fetch('/api/mode/switch', {
                 method: 'POST',

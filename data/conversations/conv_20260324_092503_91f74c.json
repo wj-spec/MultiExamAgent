@@ -1,0 +1,52 @@
+{
+  "id": "conv_20260324_092503_91f74c",
+  "title": "对话 2026-03-24 09:25",
+  "created_at": "2026-03-24T09:25:03.300545",
+  "updated_at": "2026-03-24T09:25:56.493536",
+  "message_count": 6,
+  "metadata": {},
+  "messages": [
+    {
+      "id": "msg_f94d6e95",
+      "role": "user",
+      "content": "你好 你能做什么",
+      "timestamp": "2026-03-24T09:25:21.641070",
+      "metadata": {}
+    },
+    {
+      "id": "msg_409fd2a9",
+      "role": "assistant",
+      "content": "您好！我是 IntelliExam 命题助手，可以帮助您生成各类试题。请告诉我您需要什么类型的题目？",
+      "timestamp": "2026-03-24T09:25:21.645310",
+      "metadata": {}
+    },
+    {
+      "id": "msg_308c3028",
+      "role": "user",
+      "content": "请你为我命制一道试题，关于数学代数 难度为适中",
+      "timestamp": "2026-03-24T09:25:42.103657",
+      "metadata": {}
+    },
+    {
+      "id": "msg_56077913",
+      "role": "assistant",
+      "content": "您好！我是 IntelliExam 命题助手，可以帮助您生成各类试题。请告诉我您需要什么类型的题目？",
+      "timestamp": "2026-03-24T09:25:42.107036",
+      "metadata": {}
+    },
+    {
+      "id": "msg_aaea51ba",
+      "role": "user",
+      "content": "请你为我命制一道试题，关于数学代数 难度为适中",
+      "timestamp": "2026-03-24T09:25:56.489762",
+      "metadata": {}
+    },
+    {
+      "id": "msg_206a17b4",
+      "role": "assistant",
+      "content": "您好！我是 IntelliExam 命题助手，可以帮助您生成各类试题。请告诉我您需要什么类型的题目？",
+      "timestamp": "2026-03-24T09:25:56.493536",
+      "metadata": {}
+    }
+  ]
+}
